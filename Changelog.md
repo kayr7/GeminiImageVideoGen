@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.3] - 2025-11-08
+
+### Added
+- **Server Deployment Guide** 📚
+  - Comprehensive guide for deploying on Linux servers with nginx
+  - Step-by-step nginx installation instructions for Ubuntu/Debian and CentOS/RHEL
+  - Complete SSL/TLS certificate setup using Let's Encrypt (Certbot)
+  - Firewall configuration for UFW and firewalld
+  - Security hardening recommendations
+  - Troubleshooting section with common issues and solutions
+  - Auto-renewal setup for SSL certificates
+  - Rate limiting and security headers configuration
+  - See [SERVER_DEPLOYMENT.md](./SERVER_DEPLOYMENT.md) for full details
+
+### Changed
+- Updated DEPLOYMENT.md to reference the new server deployment guide
+- Enhanced nginx configuration examples with security best practices
+
+---
+
 ## [2.0.2] - 2025-11-08
 
 ### Removed

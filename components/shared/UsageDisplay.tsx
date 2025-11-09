@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/HdMImageVideo';
+// Use relative URL that goes through nginx proxy
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '/HdMImageVideo';
 
 interface BackendUsageResponse {
   success: boolean;

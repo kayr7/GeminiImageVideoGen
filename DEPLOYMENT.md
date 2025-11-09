@@ -149,6 +149,8 @@ volumes:
 
 ## Reverse Proxy Configuration
 
+> **📘 For complete server deployment instructions including nginx installation, SSL setup, and security hardening, see [SERVER_DEPLOYMENT.md](./SERVER_DEPLOYMENT.md)**
+
 ### Nginx
 
 ```nginx

@@ -9,7 +9,8 @@ import FileUpload from '../ui/FileUpload';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import { CONSTANTS } from '@/lib/utils/constants';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/HdMImageVideo';
+// Use relative URL that goes through nginx proxy
+const API_URL = process.env.NEXT_PUBLIC_API_URL || '/HdMImageVideo';
 
 export default function VideoGenerator() {
   const [prompt, setPrompt] = useState('');
