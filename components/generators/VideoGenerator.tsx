@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
 import Button from '../ui/Button';
 import Textarea from '../ui/Textarea';
 import Select from '../ui/Select';
@@ -8,85 +10,169 @@ import MultiFileUpload from '../ui/MultiFileUpload';
 import FileUpload from '../ui/FileUpload';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import { CONSTANTS } from '@/lib/utils/constants';
+import { useAuth } from '@/lib/context/AuthContext';
+import type { ModelInfo } from '@/types';
 
 // Use relative URL that goes through nginx proxy
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '/HdMImageVideo';
 
+type VideoJob = {
+  id: string;
+  status?: string;
+  videoUrl?: string;
+  prompt?: string;
+  mode?: string;
+  createdAt?: string;
+  error?: string;
+  [key: string]: unknown;
+};
+
 export default function VideoGenerator() {
+  const { token, config, initialising } = useAuth();
+
+  const authHeaders = useMemo<Record<string, string>>(() => {
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+    return headers;
+  }, [token]);
+
+  const fallbackVideoModels = useMemo<ModelInfo[]>(
+    () =>
+      (Object.values(CONSTANTS.MODELS.VIDEO) as Array<
+        (typeof CONSTANTS.MODELS.VIDEO)[keyof typeof CONSTANTS.MODELS.VIDEO]
+      >).map((m) => ({
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        price: m.price,
+        priceUnit: m.priceUnit,
+        pricePerVideo: m.pricePerVideo,
+        tier: m.tier,
+        category: 'video',
+      })),
+    []
+  );
+
+  const videoModelAvailability = config?.models?.['video'];
+  const availableVideoModels = useMemo<ModelInfo[]>(
+    () => {
+      if (videoModelAvailability?.enabled?.length) {
+        return videoModelAvailability.enabled;
+      }
+      return fallbackVideoModels;
+    },
+    [videoModelAvailability, fallbackVideoModels]
+  );
+
+  const resolvedDefaultModel =
+    videoModelAvailability?.default ??
+    fallbackVideoModels[0]?.id ??
+    CONSTANTS.MODELS.VIDEO.VEO_3_1_FAST.id;
+
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
-  const [model, setModel] = useState('veo-3.1-fast-generate-preview');
-  
+  const [model, setModel] = useState(resolvedDefaultModel);
+
   // Three distinct image types per Veo documentation
-  const [firstFrame, setFirstFrame] = useState<string | null>(null);  // Starting frame
-  const [lastFrame, setLastFrame] = useState<string | null>(null);    // Ending frame
+  const [firstFrame, setFirstFrame] = useState<string | null>(null); // Starting frame
+  const [lastFrame, setLastFrame] = useState<string | null>(null); // Ending frame
   const [referenceImages, setReferenceImages] = useState<string[]>([]); // Style/content guidance (max 3)
-  
+
   const [generatedVideo, setGeneratedVideo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [jobHistory, setJobHistory] = useState<any[]>([]);
+  const [jobHistory, setJobHistory] = useState<VideoJob[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
 
-  // Get model info for pricing display
-  const getModelInfo = () => {
-    const models = CONSTANTS.MODELS.VIDEO;
-    return Object.values(models).find((m: any) => m.id === model);
-  };
+  useEffect(() => {
+    if (availableVideoModels.length === 0) {
+      return;
+    }
 
-  const selectedModel = getModelInfo();
+    const hasCurrentModel = availableVideoModels.some((m) => m.id === model);
+    if (!hasCurrentModel) {
+      setModel(availableVideoModels[0].id);
+      return;
+    }
 
-  const loadJobHistory = async () => {
+    const defaultInList = availableVideoModels.some((m) => m.id === resolvedDefaultModel);
+    if (resolvedDefaultModel && defaultInList && model !== resolvedDefaultModel) {
+      setModel(resolvedDefaultModel);
+    }
+  }, [availableVideoModels, resolvedDefaultModel, model]);
+
+  const selectedModel = useMemo<ModelInfo | null>(
+    () => availableVideoModels.find((m) => m.id === model) ?? null,
+    [availableVideoModels, model]
+  );
+
+  const videoGenerationEnabled = config ? config.features.videoGeneration : true;
+
+  const loadJobHistory = useCallback(async () => {
+    if (!token) {
+      return;
+    }
     try {
-      const response = await fetch(`${API_URL}/api/video/jobs`);
+      const response = await fetch(`${API_URL}/api/video/jobs`, {
+        headers: { ...authHeaders },
+      });
       const data = await response.json();
       if (data.success) {
-        setJobHistory(data.data.jobs || []);
+        const jobs = Array.isArray(data.data?.jobs)
+          ? (data.data.jobs as VideoJob[])
+          : [];
+        setJobHistory(jobs);
       }
     } catch (err) {
       console.error('Failed to load job history:', err);
     }
-  };
+  }, [token, authHeaders]);
 
   const checkJobStatus = async (jobId: string) => {
+    if (!token) {
+      return undefined;
+    }
     try {
-      const response = await fetch(`${API_URL}/api/video/jobs/${jobId}`);
+      const response = await fetch(`${API_URL}/api/video/jobs/${jobId}`, {
+        headers: { ...authHeaders },
+      });
       const data = await response.json();
       if (data.success && data.data) {
-        // Update job in history
-        setJobHistory(prev =>
-          prev.map(j => j.id === jobId ? data.data : j)
-        );
-        
-        // If completed, show the video
-        if (data.data.status === 'completed' && data.data.videoUrl) {
-          setGeneratedVideo(data.data.videoUrl);
+        const updatedJob = data.data as VideoJob;
+        setJobHistory((prev) => prev.map((job) => (job.id === jobId ? updatedJob : job)));
+
+        if (updatedJob.status === 'completed' && updatedJob.videoUrl) {
+          setGeneratedVideo(updatedJob.videoUrl);
           setStatusMessage('Video generation completed!');
         }
-        
-        return data.data;
+
+        return updatedJob;
       }
     } catch (err) {
       console.error('Failed to check job status:', err);
     }
+    return undefined;
   };
 
-  // Load job history on mount
   useEffect(() => {
-    loadJobHistory();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!initialising) {
+      loadJobHistory();
+    }
+  }, [initialising, loadJobHistory]);
 
-  // Poll for video status
   const pollVideoStatus = async (jobId: string) => {
     const maxAttempts = 60; // 10 minutes max (60 attempts * 10 seconds)
     let attempts = 0;
 
     while (attempts < maxAttempts) {
       try {
-        const response = await fetch(`${API_URL}/api/video/status?jobId=${encodeURIComponent(jobId)}`);
+        const response = await fetch(`${API_URL}/api/video/status?jobId=${encodeURIComponent(jobId)}`, {
+          headers: { ...authHeaders },
+        });
         const data = await response.json();
 
         if (!response.ok) {
@@ -98,14 +184,15 @@ export default function VideoGenerator() {
             setGeneratedVideo(data.data.videoUrl);
             setStatusMessage('Video generation completed!');
             return;
-          } else if (data.data.videoData) {
+          }
+          if (data.data.videoData) {
             setGeneratedVideo(`data:video/mp4;base64,${data.data.videoData}`);
             setStatusMessage('Video generation completed!');
             return;
           }
         } else if (data.data.status === 'processing') {
           setStatusMessage(`Processing video... (${attempts * 10}s elapsed)`);
-          await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
+          await new Promise((resolve) => setTimeout(resolve, 10000));
           attempts++;
         } else if (data.data.status === 'failed') {
           throw new Error('Video generation failed');
@@ -131,7 +218,7 @@ export default function VideoGenerator() {
 
     try {
       // Always use /generate endpoint with appropriate fields
-      const requestBody: any = {
+      const requestBody: Record<string, unknown> = {
         prompt: prompt.trim(),
         model,
       };
@@ -157,6 +244,7 @@ export default function VideoGenerator() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...authHeaders,
         },
         body: JSON.stringify(requestBody),
       });
@@ -187,6 +275,45 @@ export default function VideoGenerator() {
       setLoading(false);
     }
   };
+
+  if (config && !videoGenerationEnabled) {
+    return (
+      <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-xl p-6">
+        <h2 className="text-xl font-semibold mb-2">Video generation disabled</h2>
+        <p className="text-sm">
+          Video generation has been turned off by your administrator. Try again later or reach out to your deployment owner.
+        </p>
+      </div>
+    );
+  }
+
+  if (!initialising && !token) {
+    return (
+      <div className="max-w-xl mx-auto bg-blue-50 border border-blue-200 text-blue-900 rounded-xl p-6">
+        <h2 className="text-2xl font-bold mb-2">Sign in to generate videos</h2>
+        <p className="text-sm mb-4">
+          Log in to load Veo availability, feature toggles, and previously generated jobs for your organisation.
+        </p>
+        <Link
+          href={`/login?redirect=${encodeURIComponent('/video')}`}
+          className="inline-block px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          Go to sign in
+        </Link>
+      </div>
+    );
+  }
+
+  if (config && availableVideoModels.length === 0) {
+    return (
+      <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-6">
+        <h2 className="text-xl font-semibold mb-2">No video models available</h2>
+        <p className="text-sm">
+          All Veo models are disabled in the current configuration. Update your environment variables to enable at least one video model.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="grid md:grid-cols-2 gap-8">
@@ -281,10 +408,16 @@ export default function VideoGenerator() {
           label="Model"
           value={model}
           onChange={(e) => setModel(e.target.value)}
-          options={Object.values(CONSTANTS.MODELS.VIDEO).map((m: any) => ({
+          options={availableVideoModels.map((m) => ({
             value: m.id,
-            label: `${m.name} - $${m.pricePerVideo.toFixed(2)}/video`,
+            label:
+              m.pricePerVideo !== undefined
+                ? `${m.name} - $${m.pricePerVideo.toFixed(2)}/video`
+                : m.price !== undefined && m.priceUnit
+                ? `${m.name} - $${m.price.toFixed(2)}/${m.priceUnit.replace('per ', '')}`
+                : m.name,
           }))}
+          disabled={availableVideoModels.length === 0}
         />
 
         {selectedModel && (
@@ -294,22 +427,37 @@ export default function VideoGenerator() {
                 <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
                   {selectedModel.name}
                 </p>
-                <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                  {selectedModel.description}
-                </p>
+                {selectedModel.description && (
+                  <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
+                    {selectedModel.description}
+                  </p>
+                )}
               </div>
               <div className="text-right">
-                <p className="text-sm font-bold text-blue-900 dark:text-blue-100">
-                  ${selectedModel.pricePerVideo.toFixed(2)}
-                </p>
-                <p className="text-xs text-blue-700 dark:text-blue-300">
-                  per 8s video
-                </p>
+                {selectedModel.pricePerVideo !== undefined ? (
+                  <>
+                    <p className="text-sm font-bold text-blue-900 dark:text-blue-100">
+                      ${selectedModel.pricePerVideo.toFixed(2)}
+                    </p>
+                    <p className="text-xs text-blue-700 dark:text-blue-300">per video</p>
+                  </>
+                ) : selectedModel.price !== undefined && selectedModel.priceUnit ? (
+                  <>
+                    <p className="text-sm font-bold text-blue-900 dark:text-blue-100">
+                      ${selectedModel.price.toFixed(2)}
+                    </p>
+                    <p className="text-xs text-blue-700 dark:text-blue-300">{selectedModel.priceUnit}</p>
+                  </>
+                ) : (
+                  <p className="text-xs text-blue-700 dark:text-blue-300">Included</p>
+                )}
               </div>
             </div>
-            <p className="text-xs text-blue-600 dark:text-blue-400">
-              ${selectedModel.price}/second • 8-second videos at 720p/1080p
-            </p>
+            {selectedModel.price !== undefined && (
+              <p className="text-xs text-blue-600 dark:text-blue-400">
+                ${selectedModel.price.toFixed(2)} {selectedModel.priceUnit ?? 'per second'}
+              </p>
+            )}
           </div>
         )}
 
