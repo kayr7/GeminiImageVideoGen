@@ -562,7 +562,7 @@ export default function VideoGenerator() {
                       )}
                       {job.status === 'completed' && job.videoUrl && (
                         <button
-                          onClick={() => setGeneratedVideo(job.videoUrl)}
+                          onClick={() => setGeneratedVideo(job.videoUrl ?? null)}
                           className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
                         >
                           View Video
