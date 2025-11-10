@@ -242,10 +242,37 @@ def get_model_registry() -> Dict[str, List[ModelInfoDict]]:
     return {category: list(models.values()) for category, models in _MODELS_BY_CATEGORY.items()}
 
 
+def resolve_model_choice(category: str, requested_model: str | None) -> ModelInfoDict:
+    """Return the enabled model info for ``category`` honouring overrides.
+
+    The helper prefers the explicitly requested model when it is enabled. If no
+    model is provided (or the provided model is blank), the first enabled model
+    becomes the default. A ``LookupError`` is raised when the requested model is
+    disabled/unknown or the category has no enabled models.
+    """
+
+    enabled_models = list_enabled_models(category)
+    if not enabled_models:
+        raise LookupError(f"No enabled models configured for category '{category}'.")
+
+    requested = (requested_model or "").strip()
+
+    if requested:
+        for model in enabled_models:
+            if model["id"] == requested:
+                return model
+        raise LookupError(
+            f"Model '{requested}' is disabled or unavailable for category '{category}'."
+        )
+
+    return enabled_models[0]
+
+
 __all__ = [
     "get_application_configuration",
     "get_model_configuration",
     "get_feature_flags",
     "list_enabled_models",
     "get_model_registry",
+    "resolve_model_choice",
 ]

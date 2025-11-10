@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Optional
 
 from models import VideoGenerationRequest, VideoAnimateRequest, VideoResponse, SuccessResponse
+from utils.config import resolve_model_choice
 from utils.media_storage import get_media_storage
 from utils.video_queue import get_video_queue
 from utils.rate_limiter import check_rate_limit
@@ -63,8 +64,15 @@ async def generate_video(request: VideoGenerationRequest):
         await check_rate_limit("anonymous", "video")
         
         client = get_client()
-        
-        model_name = request.model or "veo-3.1-fast-generate-preview"
+
+        requested_model_id = (request.model or "").strip()
+
+        try:
+            model_info = resolve_model_choice("video", request.model)
+        except LookupError as error:
+            status_code = 400 if requested_model_id else 503
+            raise HTTPException(status_code=status_code, detail=str(error))
+        model_name = model_info["id"]
         
         # Check if advanced features are supported by this model
         # Reference images are only supported by veo-3.1-generate-preview (not fast variant)
@@ -131,7 +139,7 @@ async def generate_video(request: VideoGenerationRequest):
         job = queue.create_job({
             "userId": "anonymous",
             "prompt": request.prompt,
-            "model": request.model or "veo-3.1-fast-generate-preview",
+            "model": model_name,
             "mode": "text",
             "status": "processing",
             "progress": 0,
@@ -171,13 +179,22 @@ async def animate_image(request: VideoAnimateRequest):
             raise HTTPException(status_code=400, detail="At least one source image is required")
         
         client = get_client()
-        
+
+        requested_model_id = (request.model or "").strip()
+
+        try:
+            model_info = resolve_model_choice("video", request.model)
+        except LookupError as error:
+            status_code = 400 if requested_model_id else 503
+            raise HTTPException(status_code=status_code, detail=str(error))
+        model_name = model_info["id"]
+
         # Use first image as the starting frame
         image_bytes = extract_base64_bytes(request.sourceImages[0])
-        
+
         # Build kwargs for generate_videos
         kwargs = {
-            "model": request.model or "veo-3.1-fast-generate-preview",
+            "model": model_name,
             "prompt": request.prompt or "Animate this image with smooth motion",
             "first_frame": image_bytes
         }
@@ -203,7 +220,7 @@ async def animate_image(request: VideoAnimateRequest):
         job = queue.create_job({
             "userId": "anonymous",
             "prompt": request.prompt or "Animate this image",
-            "model": request.model or "veo-3.1-fast-generate-preview",
+            "model": model_name,
             "mode": "animate",
             "status": "processing",
             "progress": 0,

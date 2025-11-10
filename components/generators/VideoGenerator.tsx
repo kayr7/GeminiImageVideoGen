@@ -38,48 +38,27 @@ export default function VideoGenerator() {
     return headers;
   }, [token]);
 
-  const fallbackVideoModels = useMemo<ModelInfo[]>(
-    () =>
-      (Object.values(CONSTANTS.MODELS.VIDEO) as Array<
-        (typeof CONSTANTS.MODELS.VIDEO)[keyof typeof CONSTANTS.MODELS.VIDEO]
-      >).map((m) => ({
-        id: m.id,
-        name: m.name,
-        description: m.description,
-        price: m.price,
-        priceUnit: m.priceUnit,
-        pricePerVideo: m.pricePerVideo,
-        tier: m.tier,
-        category: 'video',
-      })),
-    []
-  );
-
   const videoModelAvailability = config?.models?.['video'];
   const availableVideoModels = useMemo<ModelInfo[]>(() => {
-    if (!videoModelAvailability) {
-      return fallbackVideoModels;
+    return videoModelAvailability?.enabled ?? [];
+  }, [videoModelAvailability]);
+
+  const defaultVideoModelId = useMemo(() => {
+    if (!availableVideoModels.length) {
+      return '';
     }
 
-    if (videoModelAvailability.enabled?.length) {
-      return videoModelAvailability.enabled;
+    const preferred = videoModelAvailability?.default;
+    if (preferred && availableVideoModels.some((modelInfo) => modelInfo.id === preferred)) {
+      return preferred;
     }
 
-    const disabledIds = new Set(
-      (videoModelAvailability.disabled ?? []).map((modelInfo) => modelInfo.id)
-    );
-
-    return fallbackVideoModels.filter((modelInfo) => !disabledIds.has(modelInfo.id));
-  }, [videoModelAvailability, fallbackVideoModels]);
-
-  const resolvedDefaultModel =
-    videoModelAvailability?.default ??
-    fallbackVideoModels[0]?.id ??
-    CONSTANTS.MODELS.VIDEO.VEO_3_1_FAST.id;
+    return availableVideoModels[0].id;
+  }, [availableVideoModels, videoModelAvailability?.default]);
 
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
-  const [model, setModel] = useState(resolvedDefaultModel);
+  const [model, setModel] = useState('');
 
   // Three distinct image types per Veo documentation
   const [firstFrame, setFirstFrame] = useState<string | null>(null); // Starting frame
@@ -96,23 +75,29 @@ export default function VideoGenerator() {
 
   useEffect(() => {
     if (availableVideoModels.length === 0) {
+      setModel('');
       return;
     }
 
-    const hasCurrentModel = availableVideoModels.some((m) => m.id === model);
-    if (!hasCurrentModel) {
-      setModel(availableVideoModels[0].id);
-      return;
-    }
+    setModel((current) => {
+      const currentExists = current && availableVideoModels.some((item) => item.id === current);
+      if (currentExists) {
+        if (
+          defaultVideoModelId &&
+          current !== defaultVideoModelId &&
+          availableVideoModels.some((item) => item.id === defaultVideoModelId)
+        ) {
+          return defaultVideoModelId;
+        }
+        return current;
+      }
 
-    const defaultInList = availableVideoModels.some((m) => m.id === resolvedDefaultModel);
-    if (resolvedDefaultModel && defaultInList && model !== resolvedDefaultModel) {
-      setModel(resolvedDefaultModel);
-    }
-  }, [availableVideoModels, resolvedDefaultModel, model]);
+      return defaultVideoModelId;
+    });
+  }, [availableVideoModels, defaultVideoModelId]);
 
   const selectedModel = useMemo<ModelInfo | null>(
-    () => availableVideoModels.find((m) => m.id === model) ?? null,
+    () => (model ? availableVideoModels.find((m) => m.id === model) ?? null : null),
     [availableVideoModels, model]
   );
 
@@ -217,6 +202,11 @@ export default function VideoGenerator() {
       return;
     }
 
+    if (!model) {
+      setError('No video model is currently available.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
     setGeneratedVideo(null);
@@ -282,7 +272,32 @@ export default function VideoGenerator() {
     }
   };
 
-  if (config && !videoGenerationEnabled) {
+  if (initialising) {
+    return <LoadingSpinner message="Loading configuration..." />;
+  }
+
+  const showAdminLoginPrompt = !initialising && !token;
+
+  if (!config) {
+    return (
+      <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-6 space-y-3">
+        <h2 className="text-xl font-semibold">Configuration unavailable</h2>
+        <p className="text-sm">
+          We couldn&apos;t load the model configuration from the server. Please try again later or contact an administrator.
+        </p>
+        {showAdminLoginPrompt && (
+          <Link
+            href={`/login?redirect=${encodeURIComponent('/video')}`}
+            className="inline-block text-sm font-medium text-blue-700 hover:text-blue-900"
+          >
+            Sign in for admin controls
+          </Link>
+        )}
+      </div>
+    );
+  }
+
+  if (!videoGenerationEnabled) {
     return (
       <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-xl p-6">
         <h2 className="text-xl font-semibold mb-2">Video generation disabled</h2>
@@ -293,7 +308,7 @@ export default function VideoGenerator() {
     );
   }
 
-  if (config && availableVideoModels.length === 0) {
+  if (availableVideoModels.length === 0) {
     return (
       <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-6">
         <h2 className="text-xl font-semibold mb-2">No video models available</h2>
@@ -303,7 +318,6 @@ export default function VideoGenerator() {
       </div>
     );
   }
-  const showAdminLoginPrompt = !initialising && !token;
 
   return (
     <div className="space-y-6">

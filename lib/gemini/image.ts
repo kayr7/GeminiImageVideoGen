@@ -1,6 +1,5 @@
 import { ImageGenerationParams, ImageResponse } from '@/types';
 import { getGeminiClient } from './client';
-import { CONSTANTS } from '../utils/constants';
 import { retryWithBackoff } from '../utils/errors';
 import { getMediaStorage } from '../storage/media-storage';
 
@@ -16,9 +15,10 @@ export async function generateImage(
     throw new Error('GEMINI_API_KEY not configured');
   }
 
+  const modelName = (params.model || '').trim() || 'gemini-2.5-flash-image';
+
   // Determine if it's Nano Banana (uses generateContent) or Imagen (uses predict)
-  const isNanoBanana = params.model === CONSTANTS.MODELS.IMAGE.NANO_BANANA.id;
-  const modelName = params.model || CONSTANTS.MODELS.IMAGE.IMAGEN_4.id;
+  const isNanoBanana = /flash|gemini/i.test(modelName);
 
   try {
     return await retryWithBackoff(async () => {
@@ -190,9 +190,8 @@ export async function editImage(
     throw new Error('GEMINI_API_KEY not configured');
   }
 
-  // Use Nano Banana by default for editing (better for conversational editing)
-  const isNanoBanana = params.model === CONSTANTS.MODELS.IMAGE.NANO_BANANA.id || !params.model;
-  const modelName = params.model || CONSTANTS.MODELS.IMAGE.NANO_BANANA.id;
+  const modelName = (params.model || '').trim() || 'gemini-2.5-flash-image';
+  const isNanoBanana = /flash|gemini/i.test(modelName);
 
   try {
     return await retryWithBackoff(async () => {

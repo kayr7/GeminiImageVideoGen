@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import type { LoginConfig, LoginResponse, LoginResponseData, LoginUser } from '@/types';
+import type { ApiResponse, LoginConfig, LoginResponse, LoginResponseData, LoginUser } from '@/types';
 
 const STORAGE_KEY = 'gemini-auth-session';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '/HdMImageVideo';
@@ -52,15 +52,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [config, setConfig] = useState<LoginConfig | null>(null);
   const [initialising, setInitialising] = useState(true);
 
-  useEffect(() => {
-    const stored = readStoredSession();
-    if (stored) {
-      setToken(stored.token);
-      setUser(stored.user);
-      setConfig(stored.config);
+  const fetchApplicationConfiguration = useCallback(async (): Promise<LoginConfig | null> => {
+    try {
+      const response = await fetch(`${API_URL}/api/config`);
+      if (!response.ok) {
+        throw new Error(`Failed to load configuration: ${response.status}`);
+      }
+
+      const payload = (await response.json()) as ApiResponse<LoginConfig>;
+      if (payload.success && payload.data) {
+        return payload.data;
+      }
+    } catch (error) {
+      console.warn('Failed to load application configuration', error);
     }
-    setInitialising(false);
+
+    return null;
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const initialise = async () => {
+      const stored = readStoredSession();
+      if (stored) {
+        setToken(stored.token);
+        setUser(stored.user);
+        setConfig(stored.config);
+      }
+
+      const latestConfig = await fetchApplicationConfiguration();
+      if (!cancelled && latestConfig) {
+        setConfig(latestConfig);
+      }
+
+      if (!cancelled) {
+        setInitialising(false);
+      }
+    };
+
+    initialise();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchApplicationConfiguration]);
 
   const persistSession = useCallback((session: StoredSession | null) => {
     if (typeof window === 'undefined') {
@@ -124,7 +160,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setConfig(null);
     persistSession(null);
-  }, [persistSession]);
+
+    setInitialising(true);
+    fetchApplicationConfiguration().then((latestConfig) => {
+      setInitialising(false);
+      if (latestConfig) {
+        setConfig(latestConfig);
+      }
+    });
+  }, [persistSession, fetchApplicationConfiguration]);
+
+  useEffect(() => {
+    if (!token || !user || !config) {
+      return;
+    }
+
+    persistSession({ token, user, config });
+  }, [token, user, config, persistSession]);
 
   const value = useMemo<AuthContextValue>(() => ({
     token,
