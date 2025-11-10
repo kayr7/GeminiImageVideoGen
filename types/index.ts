@@ -132,10 +132,16 @@ export interface ModelInfo {
   tier?: string;
 }
 
+export interface ModelQuotaConfig {
+  daily?: number | null;
+  monthly?: number | null;
+}
+
 export interface ModelAvailability {
   enabled: ModelInfo[];
   disabled: ModelInfo[];
   default?: string;
+  quotas: Record<string, ModelQuotaConfig>;
 }
 
 export interface FeatureFlags {
@@ -147,6 +153,22 @@ export interface FeatureFlags {
 export interface LoginConfig {
   models: Record<string, ModelAvailability>;
   features: FeatureFlags;
+}
+
+export interface AdminCategorySettings {
+  enabled?: string[];
+  disabled?: string[];
+  default?: string | null;
+  quotas?: Record<string, ModelQuotaConfig>;
+}
+
+export interface AdminModelConfigResponse {
+  success: boolean;
+  data: {
+    registry: Record<string, ModelInfo[]>;
+    settings: Record<string, AdminCategorySettings>;
+    effective: Record<string, ModelAvailability>;
+  };
 }
 
 export interface LoginResponseData {

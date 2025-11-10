@@ -102,10 +102,16 @@ class ModelInfo(BaseModel):
     tier: Optional[str] = None
 
 
+class ModelQuotaConfig(BaseModel):
+    daily: Optional[int] = Field(default=None, ge=0)
+    monthly: Optional[int] = Field(default=None, ge=0)
+
+
 class ModelAvailability(BaseModel):
     enabled: List[ModelInfo] = Field(default_factory=list)
     disabled: List[ModelInfo] = Field(default_factory=list)
     default: Optional[str] = None
+    quotas: Dict[str, ModelQuotaConfig] = Field(default_factory=dict)
 
 
 class FeatureFlags(BaseModel):
@@ -117,6 +123,13 @@ class FeatureFlags(BaseModel):
 class LoginConfig(BaseModel):
     models: Dict[str, ModelAvailability]
     features: FeatureFlags
+
+
+class AdminCategorySettings(BaseModel):
+    enabled: Optional[List[str]] = None
+    disabled: Optional[List[str]] = None
+    default: Optional[str] = None
+    quotas: Optional[Dict[str, ModelQuotaConfig]] = None
 
 
 class LoginUser(BaseModel):

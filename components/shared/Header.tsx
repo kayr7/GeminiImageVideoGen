@@ -13,6 +13,7 @@ export default function Header() {
   const { config, token, user, logout, initialising } = useAuth();
 
   const featureFlags = config?.features;
+  const isAdmin = user?.roles?.includes('admin') ?? false;
   const navigation = useMemo(
     () => {
       const items = [{ name: 'Home', href: '/' }];
@@ -22,9 +23,12 @@ export default function Header() {
       if (featureFlags?.videoGeneration ?? true) {
         items.push({ name: 'Video', href: '/video' });
       }
+      if (isAdmin) {
+        items.push({ name: 'Admin', href: '/admin' });
+      }
       return items;
     },
-    [featureFlags]
+    [featureFlags, isAdmin]
   );
 
   const displayName = user?.displayName || user?.username;
