@@ -30,10 +30,13 @@ type VideoJob = {
 export default function VideoGenerator() {
   const { token, config, initialising } = useAuth();
 
-  const authHeaders = useMemo<Record<string, string>>(
-    () => (token ? { Authorization: `Bearer ${token}` } : {}),
-    [token]
-  );
+  const authHeaders = useMemo<Record<string, string>>(() => {
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+    return headers;
+  }, [token]);
 
   const fallbackVideoModels = useMemo<ModelInfo[]>(
     () =>
