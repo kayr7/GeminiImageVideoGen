@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List
 
+from .admin_config import get_admin_model_settings
+
 ModelInfoDict = Dict[str, Any]
 
 # Registry of all models understood by the backend. This mirrors the frontend constants so
@@ -116,33 +118,78 @@ def _normalise_registry(registry: Dict[str, List[ModelInfoDict]]) -> Dict[str, D
 _MODELS_BY_CATEGORY = _normalise_registry(_MODEL_REGISTRY)
 
 
-def _apply_model_overrides(category: str, models: Dict[str, ModelInfoDict]) -> Dict[str, Any]:
-    """Return enabled/disabled model lists honouring environment overrides."""
-    enabled_env = set(_parse_csv(os.getenv(f"ENABLED_{category.upper()}_MODELS")))
-    disabled_env = set(_parse_csv(os.getenv(f"DISABLED_{category.upper()}_MODELS")))
+def _apply_model_overrides(
+    category: str,
+    models: Dict[str, ModelInfoDict],
+    admin_overrides: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Return enabled/disabled model lists honouring admin and environment overrides."""
+
     available_ids: List[str] = list(models.keys())
+    admin_overrides = admin_overrides or {}
 
-    if enabled_env:
-        enabled_ids = [model_id for model_id in available_ids if model_id in enabled_env]
+    admin_enabled = admin_overrides.get("enabled")
+    admin_disabled = set(admin_overrides.get("disabled", []) or [])
+    admin_default = admin_overrides.get("default")
+    admin_quotas = admin_overrides.get("quotas", {}) or {}
+
+    if admin_enabled is not None:
+        enabled_ids = [model_id for model_id in admin_enabled if model_id in available_ids]
     else:
-        enabled_ids = available_ids.copy()
+        enabled_env = set(_parse_csv(os.getenv(f"ENABLED_{category.upper()}_MODELS")))
+        disabled_env = set(_parse_csv(os.getenv(f"DISABLED_{category.upper()}_MODELS")))
 
-    if disabled_env:
-        enabled_ids = [model_id for model_id in enabled_ids if model_id not in disabled_env]
+        if enabled_env:
+            enabled_ids = [model_id for model_id in available_ids if model_id in enabled_env]
+        else:
+            enabled_ids = available_ids.copy()
 
-    default_override = os.getenv(f"DEFAULT_{category.upper()}_MODEL")
-    default_model = None
-    if default_override and default_override in enabled_ids:
-        default_model = default_override
-    elif enabled_ids:
-        default_model = enabled_ids[0]
+        if disabled_env:
+            enabled_ids = [model_id for model_id in enabled_ids if model_id not in disabled_env]
+
+    if admin_disabled:
+        enabled_ids = [model_id for model_id in enabled_ids if model_id not in admin_disabled]
+
+    default_override = None
+    if admin_default and admin_default in enabled_ids:
+        default_override = admin_default
+    elif admin_enabled is None:
+        env_default = os.getenv(f"DEFAULT_{category.upper()}_MODEL")
+        if env_default and env_default in enabled_ids:
+            default_override = env_default
+
+    if not default_override and enabled_ids:
+        default_override = enabled_ids[0]
 
     disabled_ids = [model_id for model_id in available_ids if model_id not in enabled_ids]
+
+    quotas: Dict[str, Dict[str, Any]] = {}
+    for model_id in available_ids:
+        quota_config = admin_quotas.get(model_id)
+        if not isinstance(quota_config, dict):
+            continue
+
+        quota_payload: Dict[str, Any] = {}
+        for key in ("daily", "monthly"):
+            if key in quota_config:
+                value = quota_config[key]
+                if value is None:
+                    quota_payload[key] = None
+                else:
+                    try:
+                        numeric_value = int(value)
+                    except (TypeError, ValueError):
+                        continue
+                    if numeric_value >= 0:
+                        quota_payload[key] = numeric_value
+        if quota_payload:
+            quotas[model_id] = quota_payload
 
     return {
         "enabled": [models[model_id] for model_id in enabled_ids],
         "disabled": [models[model_id] for model_id in disabled_ids],
-        "default": default_model,
+        "default": default_override,
+        "quotas": quotas,
     }
 
 
@@ -155,8 +202,10 @@ def _parse_bool(value: str | None, default: bool) -> bool:
 def get_model_configuration() -> Dict[str, Any]:
     """Return model availability information for each media type."""
     config: Dict[str, Any] = {}
+    admin_settings = get_admin_model_settings()
     for category, models in _MODELS_BY_CATEGORY.items():
-        config[category] = _apply_model_overrides(category, models)
+        overrides = admin_settings.get(category, {}) if isinstance(admin_settings, dict) else {}
+        config[category] = _apply_model_overrides(category, models, overrides)
     return config
 
 
@@ -182,8 +231,15 @@ def list_enabled_models(category: str) -> List[ModelInfoDict]:
     category = category.lower()
     if category not in _MODELS_BY_CATEGORY:
         return []
-    result = _apply_model_overrides(category, _MODELS_BY_CATEGORY[category])
+    admin_settings = get_admin_model_settings()
+    overrides = admin_settings.get(category, {}) if isinstance(admin_settings, dict) else {}
+    result = _apply_model_overrides(category, _MODELS_BY_CATEGORY[category], overrides)
     return result["enabled"]
+
+
+def get_model_registry() -> Dict[str, List[ModelInfoDict]]:
+    """Expose the full registry for administrative tooling."""
+    return {category: list(models.values()) for category, models in _MODELS_BY_CATEGORY.items()}
 
 
 __all__ = [
@@ -191,4 +247,5 @@ __all__ = [
     "get_model_configuration",
     "get_feature_flags",
     "list_enabled_models",
+    "get_model_registry",
 ]

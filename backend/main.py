@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 
-from routers import auth, image, media, usage, video
+from routers import admin, auth, image, media, usage, video
 
 # Load environment variables
 load_dotenv()
@@ -38,6 +38,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(admin.router, prefix="/api/admin", tags=["Administration"])
 app.include_router(image.router, prefix="/api/image", tags=["Image Generation"])
 app.include_router(video.router, prefix="/api/video", tags=["Video Generation"])
 app.include_router(media.router, prefix="/api/media", tags=["Media Storage"])

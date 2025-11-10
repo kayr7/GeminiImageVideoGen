@@ -14,6 +14,7 @@ from models import (
     LoginUser,
 )
 from utils.config import get_application_configuration
+from utils.session import session_manager
 
 router = APIRouter()
 USERNAME_ENV_KEYS: Tuple[str, ...] = (
@@ -68,17 +69,18 @@ async def login(request: LoginRequest) -> LoginResponse:
     ):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
 
-    token = secrets.token_urlsafe(32)
     display_name = os.getenv("APP_DISPLAY_NAME") or request.username
+    user = LoginUser(
+        username=request.username,
+        displayName=display_name,
+        roles=_load_roles(),
+    )
+    token = session_manager.create_session(user)
 
     response = LoginResponse(
         data=LoginResponseData(
             token=token,
-            user=LoginUser(
-                username=request.username,
-                displayName=display_name,
-                roles=_load_roles(),
-            ),
+            user=user,
             config=get_application_configuration(),
         )
     )
