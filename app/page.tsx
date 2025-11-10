@@ -98,14 +98,13 @@ export default function Home() {
         )}
 
         {!initialising && !token && (
-          <div className="mt-6">
-            <Link
-              href="/login"
-              className="inline-block px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow hover:bg-blue-700 transition-colors"
-            >
-              Sign in to load your configuration
-            </Link>
-          </div>
+          <p className="mt-4 text-sm text-gray-600 dark:text-gray-300">
+            Administrators can{' '}
+            <Link href="/login" className="font-semibold text-blue-600 dark:text-blue-400 hover:underline">
+              sign in
+            </Link>{' '}
+            to customise model availability and feature toggles. Everyone else can explore the generators without an account.
+          </p>
         )}
       </div>
 
