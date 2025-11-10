@@ -35,15 +35,21 @@ export default function ImageGenerator() {
   );
 
   const imageModelAvailability = config?.models ? config.models['image'] : undefined;
-  const availableImageModels = useMemo<ModelInfo[]>(
-    () => {
-      if (imageModelAvailability?.enabled?.length) {
-        return imageModelAvailability.enabled;
-      }
+  const availableImageModels = useMemo<ModelInfo[]>(() => {
+    if (!imageModelAvailability) {
       return fallbackImageModels;
-    },
-    [imageModelAvailability, fallbackImageModels]
-  );
+    }
+
+    if (imageModelAvailability.enabled?.length) {
+      return imageModelAvailability.enabled;
+    }
+
+    const disabledIds = new Set(
+      (imageModelAvailability.disabled ?? []).map((modelInfo) => modelInfo.id)
+    );
+
+    return fallbackImageModels.filter((modelInfo) => !disabledIds.has(modelInfo.id));
+  }, [imageModelAvailability, fallbackImageModels]);
 
   const resolvedDefaultModel =
     imageModelAvailability?.default ??

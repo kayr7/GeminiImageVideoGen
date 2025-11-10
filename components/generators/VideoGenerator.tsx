@@ -56,15 +56,21 @@ export default function VideoGenerator() {
   );
 
   const videoModelAvailability = config?.models?.['video'];
-  const availableVideoModels = useMemo<ModelInfo[]>(
-    () => {
-      if (videoModelAvailability?.enabled?.length) {
-        return videoModelAvailability.enabled;
-      }
+  const availableVideoModels = useMemo<ModelInfo[]>(() => {
+    if (!videoModelAvailability) {
       return fallbackVideoModels;
-    },
-    [videoModelAvailability, fallbackVideoModels]
-  );
+    }
+
+    if (videoModelAvailability.enabled?.length) {
+      return videoModelAvailability.enabled;
+    }
+
+    const disabledIds = new Set(
+      (videoModelAvailability.disabled ?? []).map((modelInfo) => modelInfo.id)
+    );
+
+    return fallbackVideoModels.filter((modelInfo) => !disabledIds.has(modelInfo.id));
+  }, [videoModelAvailability, fallbackVideoModels]);
 
   const resolvedDefaultModel =
     videoModelAvailability?.default ??
