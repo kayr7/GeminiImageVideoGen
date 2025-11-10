@@ -9,6 +9,7 @@ import base64
 from datetime import datetime
 
 from models import ImageGenerationRequest, ImageEditRequest, ImageResponse, SuccessResponse
+from utils.config import resolve_model_choice
 from utils.media_storage import get_media_storage
 from utils.rate_limiter import check_rate_limit
 
@@ -32,9 +33,18 @@ async def generate_image(request: ImageGenerationRequest):
         await check_rate_limit("anonymous", "image")
         
         client = get_client()
-        
+
+        requested_model_id = (request.model or "").strip()
+
+        try:
+            model_info = resolve_model_choice("image", request.model)
+        except LookupError as error:
+            status_code = 400 if requested_model_id else 503
+            raise HTTPException(status_code=status_code, detail=str(error))
+        model_name = model_info["id"]
+
         # Determine if using Nano Banana or Imagen
-        is_nano_banana = "flash" in request.model.lower() or "gemini" in request.model.lower()
+        is_nano_banana = "flash" in model_name.lower() or "gemini" in model_name.lower()
         
         if is_nano_banana:
             # Nano Banana (Gemini 2.5 Flash Image) approach
@@ -64,7 +74,7 @@ async def generate_image(request: ImageGenerationRequest):
                 }
             
             response = client.models.generate_content(
-                model=request.model,
+                model=model_name,
                 contents=parts,
                 config=config
             )
@@ -95,7 +105,7 @@ async def generate_image(request: ImageGenerationRequest):
                             base64_data=image_base64,
                             metadata={
                                 "prompt": request.prompt,
-                                "model": request.model,
+                                "model": model_name,
                                 "userId": "anonymous",
                                 "mimeType": "image/png"
                             }
@@ -106,7 +116,7 @@ async def generate_image(request: ImageGenerationRequest):
                             "imageUrl": f"data:image/png;base64,{image_base64}",
                             "imageData": str(image_base64),  # Ensure it's a string
                             "prompt": str(request.prompt),
-                            "model": str(request.model),
+                            "model": model_name,
                             "generatedAt": datetime.now().isoformat(),
                             "mediaId": str(media_id)
                         }
@@ -133,7 +143,7 @@ async def generate_image(request: ImageGenerationRequest):
             # For now, we'll use REST API approach
             import requests
             api_key = os.getenv("GEMINI_API_KEY")
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{request.model}:predict"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:predict"
             
             response = requests.post(
                 url,
@@ -162,7 +172,7 @@ async def generate_image(request: ImageGenerationRequest):
                         base64_data=image_base64,
                         metadata={
                             "prompt": request.prompt,
-                            "model": request.model,
+                            "model": model_name,
                             "userId": "anonymous",
                             "mimeType": "image/png"
                         }
@@ -174,7 +184,7 @@ async def generate_image(request: ImageGenerationRequest):
                             "imageUrl": f"data:image/png;base64,{image_base64}",
                             "imageData": image_base64,
                             "prompt": request.prompt,
-                            "model": request.model,
+                            "model": model_name,
                             "generatedAt": datetime.now().isoformat(),
                             "mediaId": media_id
                         }
@@ -201,7 +211,16 @@ async def edit_image(request: ImageEditRequest):
             raise HTTPException(status_code=400, detail="At least one source image is required")
         
         client = get_client()
-        is_nano_banana = "flash" in request.model.lower() or "gemini" in request.model.lower()
+        requested_model_id = (request.model or "").strip()
+
+        try:
+            model_info = resolve_model_choice("image", request.model)
+        except LookupError as error:
+            status_code = 400 if requested_model_id else 503
+            raise HTTPException(status_code=status_code, detail=str(error))
+        model_name = model_info["id"]
+
+        is_nano_banana = "flash" in model_name.lower() or "gemini" in model_name.lower()
         
         if is_nano_banana:
             # Build parts with prompt and images
@@ -227,7 +246,7 @@ async def edit_image(request: ImageEditRequest):
                 }
             
             response = client.models.generate_content(
-                model=request.model,
+                model=model_name,
                 contents=parts,
                 config=config
             )
@@ -258,7 +277,7 @@ async def edit_image(request: ImageEditRequest):
                             base64_data=image_base64,
                             metadata={
                                 "prompt": request.prompt,
-                                "model": request.model,
+                                "model": model_name,
                                 "userId": "anonymous",
                                 "mimeType": "image/png"
                             }
@@ -269,7 +288,7 @@ async def edit_image(request: ImageEditRequest):
                             "imageUrl": f"data:image/png;base64,{image_base64}",
                             "imageData": str(image_base64),  # Ensure it's a string
                             "prompt": str(request.prompt),
-                            "model": str(request.model),
+                            "model": model_name,
                             "generatedAt": datetime.now().isoformat(),
                             "mediaId": str(media_id)
                         }

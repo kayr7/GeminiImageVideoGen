@@ -8,7 +8,6 @@ import Textarea from '../ui/Textarea';
 import Select from '../ui/Select';
 import MultiFileUpload from '../ui/MultiFileUpload';
 import LoadingSpinner from '../shared/LoadingSpinner';
-import { CONSTANTS } from '@/lib/utils/constants';
 import { useAuth } from '@/lib/context/AuthContext';
 import type { ModelInfo } from '@/types';
 
@@ -18,46 +17,26 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || '/HdMImageVideo';
 export default function ImageGenerator() {
   const { token, config, initialising } = useAuth();
 
-  const fallbackImageModels = useMemo<ModelInfo[]>(
-    () =>
-      (Object.values(CONSTANTS.MODELS.IMAGE) as Array<
-        (typeof CONSTANTS.MODELS.IMAGE)[keyof typeof CONSTANTS.MODELS.IMAGE]
-      >).map((m) => ({
-        id: m.id,
-        name: m.name,
-        description: m.description,
-        price: m.price,
-        priceUnit: m.priceUnit,
-        tier: m.tier,
-        category: 'image',
-      })),
-    []
-  );
-
-  const imageModelAvailability = config?.models ? config.models['image'] : undefined;
+  const imageModelAvailability = config?.models?.['image'];
   const availableImageModels = useMemo<ModelInfo[]>(() => {
-    if (!imageModelAvailability) {
-      return fallbackImageModels;
+    return imageModelAvailability?.enabled ?? [];
+  }, [imageModelAvailability]);
+
+  const defaultImageModelId = useMemo(() => {
+    if (!availableImageModels.length) {
+      return '';
     }
 
-    if (imageModelAvailability.enabled?.length) {
-      return imageModelAvailability.enabled;
+    const preferred = imageModelAvailability?.default;
+    if (preferred && availableImageModels.some((modelInfo) => modelInfo.id === preferred)) {
+      return preferred;
     }
 
-    const disabledIds = new Set(
-      (imageModelAvailability.disabled ?? []).map((modelInfo) => modelInfo.id)
-    );
-
-    return fallbackImageModels.filter((modelInfo) => !disabledIds.has(modelInfo.id));
-  }, [imageModelAvailability, fallbackImageModels]);
-
-  const resolvedDefaultModel =
-    imageModelAvailability?.default ??
-    fallbackImageModels[0]?.id ??
-    CONSTANTS.MODELS.IMAGE.NANO_BANANA.id;
+    return availableImageModels[0].id;
+  }, [availableImageModels, imageModelAvailability?.default]);
 
   const [prompt, setPrompt] = useState('');
-  const [model, setModel] = useState<string>(resolvedDefaultModel);
+  const [model, setModel] = useState<string>('');
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
@@ -66,23 +45,29 @@ export default function ImageGenerator() {
 
   useEffect(() => {
     if (availableImageModels.length === 0) {
+      setModel('');
       return;
     }
 
-    const hasCurrentModel = availableImageModels.some((m) => m.id === model);
-    if (!hasCurrentModel) {
-      setModel(availableImageModels[0].id);
-      return;
-    }
+    setModel((current) => {
+      const currentExists = current && availableImageModels.some((item) => item.id === current);
+      if (currentExists) {
+        if (
+          defaultImageModelId &&
+          current !== defaultImageModelId &&
+          availableImageModels.some((item) => item.id === defaultImageModelId)
+        ) {
+          return defaultImageModelId;
+        }
+        return current;
+      }
 
-    const defaultInList = availableImageModels.some((m) => m.id === resolvedDefaultModel);
-    if (resolvedDefaultModel && defaultInList && model !== resolvedDefaultModel) {
-      setModel(resolvedDefaultModel);
-    }
-  }, [availableImageModels, resolvedDefaultModel, model]);
+      return defaultImageModelId;
+    });
+  }, [availableImageModels, defaultImageModelId]);
 
   const selectedModel = useMemo<ModelInfo | null>(
-    () => availableImageModels.find((m) => m.id === model) ?? null,
+    () => (model ? availableImageModels.find((m) => m.id === model) ?? null : null),
     [availableImageModels, model]
   );
 
@@ -91,6 +76,11 @@ export default function ImageGenerator() {
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       setError('Please enter a prompt');
+      return;
+    }
+
+    if (!model) {
+      setError('No image model is currently available.');
       return;
     }
 
@@ -111,7 +101,7 @@ export default function ImageGenerator() {
         headers,
         body: JSON.stringify({
           prompt,
-          model,
+          model: model || undefined,
           aspectRatio,
           referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
         }),
@@ -149,7 +139,32 @@ export default function ImageGenerator() {
     document.body.removeChild(link);
   };
 
-  if (config && !imageGenerationEnabled) {
+  if (initialising) {
+    return <LoadingSpinner message="Loading configuration..." />;
+  }
+
+  const showAdminLoginPrompt = !initialising && !token;
+
+  if (!config) {
+    return (
+      <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-6 space-y-3">
+        <h2 className="text-xl font-semibold">Configuration unavailable</h2>
+        <p className="text-sm">
+          We couldn&apos;t load the model configuration from the server. Please try again later or contact an administrator.
+        </p>
+        {showAdminLoginPrompt && (
+          <Link
+            href={`/login?redirect=${encodeURIComponent('/image')}`}
+            className="inline-block text-sm font-medium text-blue-700 hover:text-blue-900"
+          >
+            Sign in for admin controls
+          </Link>
+        )}
+      </div>
+    );
+  }
+
+  if (!imageGenerationEnabled) {
     return (
       <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-xl p-6">
         <h2 className="text-xl font-semibold mb-2">Image generation disabled</h2>
@@ -160,7 +175,7 @@ export default function ImageGenerator() {
     );
   }
 
-  if (config && availableImageModels.length === 0) {
+  if (availableImageModels.length === 0) {
     return (
       <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-6">
         <h2 className="text-xl font-semibold mb-2">No image models available</h2>
@@ -170,7 +185,6 @@ export default function ImageGenerator() {
       </div>
     );
   }
-  const showAdminLoginPrompt = !initialising && !token;
 
   return (
     <div className="space-y-6">
