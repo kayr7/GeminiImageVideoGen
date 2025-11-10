@@ -1,32 +1,86 @@
 'use client';
 
-import { useState } from 'react';
+import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
+
 import Button from '../ui/Button';
 import Textarea from '../ui/Textarea';
 import Select from '../ui/Select';
 import MultiFileUpload from '../ui/MultiFileUpload';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import { CONSTANTS } from '@/lib/utils/constants';
+import { useAuth } from '@/lib/context/AuthContext';
+import type { ModelInfo } from '@/types';
 
 // Use relative URL that goes through nginx proxy
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '/HdMImageVideo';
 
 export default function ImageGenerator() {
+  const { token, config, initialising } = useAuth();
+
+  const fallbackImageModels = useMemo<ModelInfo[]>(
+    () =>
+      (Object.values(CONSTANTS.MODELS.IMAGE) as Array<
+        (typeof CONSTANTS.MODELS.IMAGE)[keyof typeof CONSTANTS.MODELS.IMAGE]
+      >).map((m) => ({
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        price: m.price,
+        priceUnit: m.priceUnit,
+        tier: m.tier,
+        category: 'image',
+      })),
+    []
+  );
+
+  const imageModelAvailability = config?.models ? config.models['image'] : undefined;
+  const availableImageModels = useMemo<ModelInfo[]>(
+    () => {
+      if (imageModelAvailability?.enabled?.length) {
+        return imageModelAvailability.enabled;
+      }
+      return fallbackImageModels;
+    },
+    [imageModelAvailability, fallbackImageModels]
+  );
+
+  const resolvedDefaultModel =
+    imageModelAvailability?.default ??
+    fallbackImageModels[0]?.id ??
+    CONSTANTS.MODELS.IMAGE.NANO_BANANA.id;
+
   const [prompt, setPrompt] = useState('');
-  const [model, setModel] = useState<string>(CONSTANTS.MODELS.IMAGE.NANO_BANANA.id);
+  const [model, setModel] = useState<string>(resolvedDefaultModel);
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Get model info for pricing display
-  const getModelInfo = () => {
-    const models = CONSTANTS.MODELS.IMAGE;
-    return Object.values(models).find((m: any) => m.id === model);
-  };
+  useEffect(() => {
+    if (availableImageModels.length === 0) {
+      return;
+    }
 
-  const selectedModel = getModelInfo();
+    const hasCurrentModel = availableImageModels.some((m) => m.id === model);
+    if (!hasCurrentModel) {
+      setModel(availableImageModels[0].id);
+      return;
+    }
+
+    const defaultInList = availableImageModels.some((m) => m.id === resolvedDefaultModel);
+    if (resolvedDefaultModel && defaultInList && model !== resolvedDefaultModel) {
+      setModel(resolvedDefaultModel);
+    }
+  }, [availableImageModels, resolvedDefaultModel, model]);
+
+  const selectedModel = useMemo<ModelInfo | null>(
+    () => availableImageModels.find((m) => m.id === model) ?? null,
+    [availableImageModels, model]
+  );
+
+  const imageGenerationEnabled = config ? config.features.imageGeneration : true;
 
   const handleGenerate = async () => {
     if (!prompt.trim()) {
@@ -39,11 +93,16 @@ export default function ImageGenerator() {
     setGeneratedImage(null);
 
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) {
+        headers.Authorization = `Bearer ${token}`;
+      }
+
       const response = await fetch(`${API_URL}/api/image/generate`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           prompt,
           model,
@@ -84,6 +143,45 @@ export default function ImageGenerator() {
     document.body.removeChild(link);
   };
 
+  if (config && !imageGenerationEnabled) {
+    return (
+      <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-xl p-6">
+        <h2 className="text-xl font-semibold mb-2">Image generation disabled</h2>
+        <p className="text-sm">
+          Image generation has been turned off by your administrator. Check back later or contact support for access.
+        </p>
+      </div>
+    );
+  }
+
+  if (!initialising && !token) {
+    return (
+      <div className="max-w-xl mx-auto bg-blue-50 border border-blue-200 text-blue-900 rounded-xl p-6">
+        <h2 className="text-2xl font-bold mb-2">Sign in to generate images</h2>
+        <p className="text-sm mb-4">
+          Authenticate to load the correct model availability and feature toggles configured for your deployment.
+        </p>
+        <Link
+          href={`/login?redirect=${encodeURIComponent('/image')}`}
+          className="inline-block px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+        >
+          Go to sign in
+        </Link>
+      </div>
+    );
+  }
+
+  if (config && availableImageModels.length === 0) {
+    return (
+      <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-6">
+        <h2 className="text-xl font-semibold mb-2">No image models available</h2>
+        <p className="text-sm">
+          All image generation models are disabled in the current configuration. Adjust your environment variables to enable at least one model.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="grid md:grid-cols-2 gap-8">
       {/* Controls */}
@@ -105,10 +203,14 @@ export default function ImageGenerator() {
             label="Model"
             value={model}
             onChange={(e) => setModel(e.target.value)}
-            options={Object.values(CONSTANTS.MODELS.IMAGE).map((m: any) => ({
+            options={availableImageModels.map((m) => ({
               value: m.id,
-              label: `${m.name} - $${m.price.toFixed(2)}/${m.priceUnit.replace('per ', '')}`,
+              label:
+                m.price !== undefined && m.priceUnit
+                  ? `${m.name} - $${m.price.toFixed(2)}/${m.priceUnit.replace('per ', '')}`
+                  : m.name,
             }))}
+            disabled={availableImageModels.length === 0}
           />
 
           <Select
@@ -135,17 +237,25 @@ export default function ImageGenerator() {
                 <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
                   {selectedModel.name}
                 </p>
-                <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                  {selectedModel.description}
-                </p>
+                {selectedModel.description && (
+                  <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
+                    {selectedModel.description}
+                  </p>
+                )}
               </div>
               <div className="text-right">
-                <p className="text-sm font-bold text-blue-900 dark:text-blue-100">
-                  ${selectedModel.price.toFixed(2)}
-                </p>
-                <p className="text-xs text-blue-700 dark:text-blue-300">
-                  {selectedModel.priceUnit}
-                </p>
+                {selectedModel.price !== undefined && selectedModel.priceUnit ? (
+                  <>
+                    <p className="text-sm font-bold text-blue-900 dark:text-blue-100">
+                      ${selectedModel.price.toFixed(2)}
+                    </p>
+                    <p className="text-xs text-blue-700 dark:text-blue-300">
+                      {selectedModel.priceUnit}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-xs text-blue-700 dark:text-blue-300">Included</p>
+                )}
               </div>
             </div>
           </div>

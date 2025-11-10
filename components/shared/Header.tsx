@@ -1,17 +1,33 @@
 'use client';
 
 import Link from 'next/link';
+import { useMemo } from 'react';
 import { usePathname } from 'next/navigation';
+
+import { useAuth } from '@/lib/context/AuthContext';
+
 import UsageDisplay from './UsageDisplay';
 
 export default function Header() {
   const pathname = usePathname();
+  const { config, token, user, logout, initialising } = useAuth();
 
-  const navigation = [
-    { name: 'Home', href: '/' },
-    { name: 'Image', href: '/image' },
-    { name: 'Video', href: '/video' },
-  ];
+  const featureFlags = config?.features;
+  const navigation = useMemo(
+    () => {
+      const items = [{ name: 'Home', href: '/' }];
+      if (featureFlags?.imageGeneration ?? true) {
+        items.push({ name: 'Image', href: '/image' });
+      }
+      if (featureFlags?.videoGeneration ?? true) {
+        items.push({ name: 'Video', href: '/video' });
+      }
+      return items;
+    },
+    [featureFlags]
+  );
+
+  const displayName = user?.displayName || user?.username;
 
   const isActive = (href: string) => {
     if (href === '/') {
@@ -63,29 +79,55 @@ export default function Header() {
           </nav>
 
           {/* Usage Display */}
-          <div className="hidden lg:block">
-            <UsageDisplay />
-          </div>
+          <div className="flex items-center space-x-3">
+            <div className="hidden lg:block">
+              <UsageDisplay />
+            </div>
 
-          {/* Mobile menu button */}
-          <button
-            className="md:hidden p-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-            aria-label="Menu"
-          >
-            <svg
-              className="w-6 h-6"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+            {!initialising && token && (
+              <div className="hidden md:flex items-center space-x-3 text-sm text-gray-600 dark:text-gray-300">
+                <span>Signed in as {displayName}</span>
+              </div>
+            )}
+
+            {!initialising && token && (
+              <button
+                onClick={logout}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors"
+              >
+                Sign out
+              </button>
+            )}
+
+            {!initialising && !token && (
+              <Link
+                href="/login"
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors"
+              >
+                Sign in
+              </Link>
+            )}
+
+            {/* Mobile menu button */}
+            <button
+              className="md:hidden p-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+              aria-label="Menu"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 6h16M4 12h16M4 18h16"
-              />
-            </svg>
-          </button>
+              <svg
+                className="w-6 h-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 6h16M4 12h16M4 18h16"
+                />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </header>

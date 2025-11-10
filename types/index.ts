@@ -109,3 +109,54 @@ export interface RateLimitStorage {
   clear(): Promise<void>;
 }
 
+// Authentication Types
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface LoginUser {
+  username: string;
+  displayName?: string;
+  roles: string[];
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  category: string;
+  description?: string;
+  price?: number;
+  priceUnit?: string;
+  pricePerVideo?: number;
+  tier?: string;
+}
+
+export interface ModelAvailability {
+  enabled: ModelInfo[];
+  disabled: ModelInfo[];
+  default?: string;
+}
+
+export interface FeatureFlags {
+  imageGeneration: boolean;
+  videoGeneration: boolean;
+  musicGeneration: boolean;
+}
+
+export interface LoginConfig {
+  models: Record<string, ModelAvailability>;
+  features: FeatureFlags;
+}
+
+export interface LoginResponseData {
+  token: string;
+  user: LoginUser;
+  config: LoginConfig;
+}
+
+export interface LoginResponse {
+  success: boolean;
+  data: LoginResponseData;
+}
+

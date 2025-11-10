@@ -1,4 +1,9 @@
+'use client';
+
 import Link from 'next/link';
+import { useMemo } from 'react';
+
+import { useAuth } from '@/lib/context/AuthContext';
 
 // Simple SVG icons
 const PhotoIcon = ({ className }: { className?: string }) => (
@@ -13,33 +18,64 @@ const VideoCameraIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+const FEATURE_DEFINITIONS = {
+  image: {
+    title: 'Image Generation',
+    description: 'Create stunning images from text prompts or transform existing images with AI-powered editing.',
+    icon: PhotoIcon,
+    href: '/image',
+    capabilities: [
+      'Text-to-image generation',
+      'Image-to-image transformation',
+      'AI-powered image editing',
+      'Style transfer with reference images',
+    ],
+  },
+  video: {
+    title: 'Video Generation',
+    description: 'Generate videos from text descriptions or animate still images into dynamic content.',
+    icon: VideoCameraIcon,
+    href: '/video',
+    capabilities: [
+      'Text-to-video creation',
+      'Image-to-video animation',
+      'Multiple quality options',
+      'Configurable duration',
+    ],
+  },
+} as const;
+
 export default function Home() {
-  const features = [
-    {
-      title: 'Image Generation',
-      description: 'Create stunning images from text prompts or transform existing images with AI-powered editing.',
-      icon: PhotoIcon,
-      href: '/image',
-      capabilities: [
-        'Text-to-image generation',
-        'Image-to-image transformation',
-        'AI-powered image editing',
-        'Style transfer with reference images',
-      ],
-    },
-    {
-      title: 'Video Generation',
-      description: 'Generate videos from text descriptions or animate still images into dynamic content.',
-      icon: VideoCameraIcon,
-      href: '/video',
-      capabilities: [
-        'Text-to-video creation',
-        'Image-to-video animation',
-        'Multiple quality options',
-        'Configurable duration',
-      ],
-    },
-  ];
+  const { token, user, config, initialising } = useAuth();
+
+  const featureFlags = config?.features;
+  const visibleFeatures = useMemo(() => {
+    const items = [] as Array<(typeof FEATURE_DEFINITIONS)[keyof typeof FEATURE_DEFINITIONS]>;
+    if (featureFlags?.imageGeneration ?? true) {
+      items.push(FEATURE_DEFINITIONS.image);
+    }
+    if (featureFlags?.videoGeneration ?? true) {
+      items.push(FEATURE_DEFINITIONS.video);
+    }
+    return items;
+  }, [featureFlags]);
+
+  const modelSummaries = useMemo(() => {
+    if (!config) {
+      return [] as Array<{
+        category: string;
+        enabled: number;
+        disabled: number;
+        defaultModel?: string;
+      }>;
+    }
+    return Object.entries(config.models).map(([category, availability]) => ({
+      category,
+      enabled: availability.enabled.length,
+      disabled: availability.disabled.length,
+      defaultModel: availability.default,
+    }));
+  }, [config]);
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -49,15 +85,56 @@ export default function Home() {
           Gemini Creative Playground
         </h1>
         <p className="text-xl text-gray-600 dark:text-gray-300 max-w-3xl mx-auto">
-          Explore the power of Google&apos;s Gemini AI with interactive tools for 
-          image and video generation. Perfect for students, educators, 
+          Explore the power of Google&apos;s Gemini AI with interactive tools for
+          image and video generation. Perfect for students, educators,
           and creative enthusiasts.
         </p>
+
+        {!initialising && token && (
+          <p className="mt-4 text-sm text-gray-600 dark:text-gray-300">
+            Signed in as <span className="font-semibold">{user?.displayName || user?.username}</span>.
+            Your configuration controls which models appear throughout the app.
+          </p>
+        )}
+
+        {!initialising && !token && (
+          <div className="mt-6">
+            <Link
+              href="/login"
+              className="inline-block px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow hover:bg-blue-700 transition-colors"
+            >
+              Sign in to load your configuration
+            </Link>
+          </div>
+        )}
       </div>
+
+      {config && (
+        <div className="mb-16 grid gap-4 md:grid-cols-2">
+          {modelSummaries.map((summary) => (
+            <div
+              key={summary.category}
+              className="p-4 border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 rounded-xl text-left"
+            >
+              <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-100 capitalize">
+                {summary.category} models
+              </h3>
+              <p className="text-sm text-blue-800 dark:text-blue-300 mt-1">
+                {summary.enabled} enabled{summary.disabled > 0 ? ` • ${summary.disabled} disabled` : ''}
+              </p>
+              {summary.defaultModel && (
+                <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
+                  Default model: <span className="font-medium">{summary.defaultModel}</span>
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Feature Cards */}
       <div className="grid md:grid-cols-2 gap-8 mb-16">
-        {features.map((feature) => (
+        {visibleFeatures.map((feature) => (
           <Link
             key={feature.title}
             href={feature.href}

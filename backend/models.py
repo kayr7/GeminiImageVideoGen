@@ -1,9 +1,9 @@
-"""
-Pydantic models for request/response validation
-"""
-from pydantic import BaseModel, Field
-from typing import Optional, List
+"""Pydantic models for request/response validation."""
+
 from datetime import datetime
+from typing import Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 # Image Generation Models
 class ImageGenerationRequest(BaseModel):
@@ -88,4 +88,55 @@ class ErrorResponse(BaseModel):
     success: bool = False
     error: str
     details: Optional[List[str]] = None
+
+
+# Authentication Models
+class ModelInfo(BaseModel):
+    id: str
+    name: str
+    category: str
+    description: Optional[str] = None
+    price: Optional[float] = None
+    priceUnit: Optional[str] = None
+    pricePerVideo: Optional[float] = None
+    tier: Optional[str] = None
+
+
+class ModelAvailability(BaseModel):
+    enabled: List[ModelInfo] = Field(default_factory=list)
+    disabled: List[ModelInfo] = Field(default_factory=list)
+    default: Optional[str] = None
+
+
+class FeatureFlags(BaseModel):
+    imageGeneration: bool = True
+    videoGeneration: bool = True
+    musicGeneration: bool = True
+
+
+class LoginConfig(BaseModel):
+    models: Dict[str, ModelAvailability]
+    features: FeatureFlags
+
+
+class LoginUser(BaseModel):
+    username: str
+    displayName: Optional[str] = None
+    roles: List[str] = Field(default_factory=list)
+
+
+class LoginResponseData(BaseModel):
+    token: str
+    user: LoginUser
+    config: LoginConfig
+
+
+class LoginResponse(BaseModel):
+    success: bool = True
+    data: LoginResponseData
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=128)
+    password: str = Field(..., min_length=1, max_length=128)
 
