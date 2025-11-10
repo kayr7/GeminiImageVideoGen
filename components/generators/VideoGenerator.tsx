@@ -532,7 +532,9 @@ export default function VideoGenerator() {
                         <p className="font-medium truncate">{job.prompt}</p>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                           {job.mode === 'text' ? 'Text-to-Video' : 'Image-to-Video'} • {' '}
-                          {new Date(job.createdAt).toLocaleString()}
+                          {job.createdAt
+                            ? new Date(job.createdAt).toLocaleString()
+                            : 'Date unavailable'}
                         </p>
                       </div>
                       <span
