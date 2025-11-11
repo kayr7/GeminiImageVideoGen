@@ -25,6 +25,10 @@
 # Media storage (generated images and videos)
 .media-storage/
 
+# Database storage
+.data/
+backend/.data/
+
 # debug
 npm-debug.log*
 yarn-debug.log*

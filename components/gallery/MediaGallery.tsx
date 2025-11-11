@@ -25,6 +25,7 @@ interface MediaItem {
   mimeType: string;
   url: string;
   details?: MediaDetails | null;
+  ipAddress?: string | null;
 }
 
 interface MediaListResponse {
@@ -146,6 +147,7 @@ export default function MediaGallery() {
             mimeType: isNonEmptyString(item.mimeType) ? item.mimeType : '',
             url: resolveMediaUrl(isNonEmptyString(item.url) ? item.url : `/api/media/${id}`),
             details,
+            ipAddress: isNonEmptyString(item.ipAddress) ? item.ipAddress : null,
           });
 
           return acc;
@@ -210,6 +212,11 @@ export default function MediaGallery() {
           Browse every image and video generated in this workspace. Each entry includes the original prompt, model selection, and
           any reference images that were supplied during generation.
         </p>
+        <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+          <p className="text-xs text-blue-700 dark:text-blue-300">
+            <span className="font-semibold">Privacy Notice:</span> IP addresses are logged for abuse prevention only and are visible to administrators. This data helps identify and prevent misuse of the service.
+          </p>
+        </div>
       </div>
 
       {error && (
@@ -323,16 +330,27 @@ export default function MediaGallery() {
                 </div>
 
                 {isAdmin && (
-                  <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-5 py-3 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleDelete(item.id);
-                      }}
-                      className="text-sm font-medium text-red-600 hover:text-red-500"
-                    >
-                      Delete
-                    </button>
+                  <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-5 py-3">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="text-xs text-gray-600 dark:text-gray-400">
+                        {item.ipAddress ? (
+                          <span>
+                            <span className="font-medium">IP:</span> {item.ipAddress}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 dark:text-gray-500">No IP recorded</span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleDelete(item.id);
+                        }}
+                        className="text-sm font-medium text-red-600 hover:text-red-500"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 )}
               </article>

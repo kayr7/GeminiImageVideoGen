@@ -15,6 +15,7 @@ services:
     volumes:
       - ./backend/.media-storage:/app/.media-storage
       - ./backend/.video-jobs:/app/.video-jobs
+      - ./backend/.data:/app/.data  # SQLite database persistence
     restart: unless-stopped
     networks:
       - app-network

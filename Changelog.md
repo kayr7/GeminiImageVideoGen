@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.8] - 2025-11-11
+
+### Added
+- **Database Persistence Across Container Restarts** 💾
+  - Added Docker volume mount for SQLite database directory (`backend/.data/`)
+  - Database now persists when containers are stopped, rebuilt, or restarted
+  - No more data loss after `docker-compose down` or container rebuilds
+  - Updated `.gitignore` to exclude database files from version control
+  - Created comprehensive `DATABASE-PERSISTENCE.md` documentation with:
+    - Backup strategies and automation scripts
+    - Migration guides between environments
+    - Troubleshooting common database issues
+    - Security and monitoring best practices
+  - Files: `docker-compose.yml`, `.gitignore`, `DATABASE-PERSISTENCE.md`
+
+- **IP Address Display for Admins** 🔍
+  - Gallery now shows IP addresses to administrators in each media card
+  - IP displayed in admin section alongside delete button
+  - Shows "No IP recorded" for legacy entries without IP tracking
+  - Helps admins quickly identify generation sources for abuse investigation
+  - File: `components/gallery/MediaGallery.tsx`
+
+- **Privacy Notice in Gallery** 🔒
+  - Added prominent privacy notice explaining IP logging
+  - Notice appears at top of gallery for all users
+  - Transparent about data collection for abuse prevention
+  - Blue-highlighted notice box for visibility
+  - File: `components/gallery/MediaGallery.tsx`
+
+---
+
 ## [2.0.7] - 2025-11-11
 
 ### Changed
