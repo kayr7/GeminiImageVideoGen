@@ -349,8 +349,8 @@ async def edit_image(
         # Get client IP for abuse tracking
         client_ip = get_client_ip(request)
 
-        # Check quota before generation
-        has_quota, error_msg = QuotaManager.check_quota(db_user.id, "edit")
+        # Check quota before generation (image editing counts towards image quota)
+        has_quota, error_msg = QuotaManager.check_quota(db_user.id, "image")
         if not has_quota:
             raise HTTPException(status_code=429, detail=error_msg)
 
@@ -435,8 +435,8 @@ async def edit_image(
                             },
                         )
 
-                        # Increment quota after successful generation
-                        QuotaManager.increment_quota(db_user.id, "edit")
+                        # Increment quota after successful generation (image editing counts towards image quota)
+                        QuotaManager.increment_quota(db_user.id, "image")
 
                         # Return response with all string values
                         response_data = {

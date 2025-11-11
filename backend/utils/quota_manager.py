@@ -61,7 +61,6 @@ class QuotaManager:
     DEFAULT_QUOTAS = {
         "image": {"type": "limited", "limit": 100},
         "video": {"type": "limited", "limit": 50},
-        "edit": {"type": "limited", "limit": 100},
     }
 
     @staticmethod
@@ -176,7 +175,10 @@ class QuotaManager:
         # Check if quota is available
         if quota.quota_used >= quota.quota_limit:
             if quota.quota_limit == 0:
-                return False, f"Your {generation_type} quota is set to 0. Contact your administrator."
+                return (
+                    False,
+                    f"Your {generation_type} quota is set to 0. Contact your administrator.",
+                )
             return (
                 False,
                 f"Quota exceeded. You have used {quota.quota_used}/{quota.quota_limit} {generation_type} generations.",
@@ -237,7 +239,9 @@ class QuotaManager:
                 updates.append("quota_limit = ?")
                 params.append(None)
 
-        if quota_limit is not None and (quota_type != "unlimited" if quota_type else quota.quota_type != "unlimited"):
+        if quota_limit is not None and (
+            quota_type != "unlimited" if quota_type else quota.quota_type != "unlimited"
+        ):
             updates.append("quota_limit = ?")
             # Allow 0 quotas
             params.append(max(0, quota_limit) if quota_limit >= 0 else quota_limit)
@@ -277,7 +281,9 @@ class QuotaManager:
             return result.rowcount > 0
 
     @staticmethod
-    def set_default_quotas(user_id: str, custom_quotas: Optional[Dict[str, Dict[str, Any]]] = None):
+    def set_default_quotas(
+        user_id: str, custom_quotas: Optional[Dict[str, Dict[str, Any]]] = None
+    ):
         """
         Set default quotas for a new user.
 
@@ -286,7 +292,9 @@ class QuotaManager:
             custom_quotas: Optional custom quota configuration
                           Format: {"image": {"type": "limited", "limit": 100}, ...}
         """
-        quotas_to_create = custom_quotas if custom_quotas else QuotaManager.DEFAULT_QUOTAS
+        quotas_to_create = (
+            custom_quotas if custom_quotas else QuotaManager.DEFAULT_QUOTAS
+        )
 
         for gen_type, quota_config in quotas_to_create.items():
             # Check if quota already exists

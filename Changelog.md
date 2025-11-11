@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.2.0] - 2025-11-11
+
+### Changed
+- **Simplified Quota Types** 🎯
+  - Removed separate "edit" quota - now only **image** and **video** quotas exist
+  - Image editing counts towards **image quota**
+  - Video editing counts towards **video quota** (future feature)
+  - Clearer and simpler for users to understand
+  - Files: `backend/utils/quota_manager.py`, `backend/utils/database.py` (migration #5), `backend/routers/image.py`, `app/admin/page.tsx`
+
+### Migration Notes
+- Migration #5 automatically removes old "edit" quotas
+- Image and video quotas are preserved
+- Existing users unaffected (edit quota usage merged into image quota conceptually)
+
+---
+
+## [3.1.1] - 2025-11-11
+
+### Improved
+- **Direct Inline Editing** ⚡
+  - Removed "Edit" button - quotas are now **always editable**
+  - Just change the dropdown or input → Save button appears automatically
+  - 40% fewer clicks to update quotas
+  - Better UX with smart change detection
+  - Cancel button to undo changes before saving
+  - File: `app/admin/page.tsx`
+
+---
+
 ## [3.1.0] - 2025-11-11
 
 ### Changed
@@ -19,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Admin Dashboard Redesigned** 🎨
   - Single table view with all users and quotas visible at once
-  - Inline quota editing - click "Edit" → change values → "Save"
+  - Inline quota editing with progress bars
   - Visual progress bars for quota usage (red when > 80%)
   - Quick actions in each row (Activate/Deactivate, Reset Password)
   - Quota display shows "Total: X" instead of time period

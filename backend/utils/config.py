@@ -29,16 +29,6 @@ _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
             "priceUnit": "per image",
             "tier": "paid",
         },
-        # Note: Imagen 3.0 has been removed as it's not available in v1beta API
-        # If you have access, you can add it back:
-        # {
-        #     "id": "imagen-3.0-generate-001",  # Note: -001 not -002
-        #     "name": "Imagen 3.0",
-        #     "description": "High quality image generation",
-        #     "price": 0.02,
-        #     "priceUnit": "per image",
-        #     "tier": "paid",
-        # },
     ],
     "video": [
         {
@@ -77,23 +67,6 @@ _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
             "pricePerVideo": 1.20,
             "tier": "paid",
         },
-        {
-            "id": "veo-2.0-generate-001",
-            "name": "Veo 2.0",
-            "description": "5-8s video (no audio)",
-            "price": 0.35,
-            "priceUnit": "per second",
-            "pricePerVideo": 2.80,
-            "tier": "paid",
-        },
-    ],
-    "music": [
-        {
-            "id": "musiclm-001",
-            "name": "MusicLM",
-            "description": "Text-to-music generation",
-            "tier": "beta",
-        }
     ],
 }
 

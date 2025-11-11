@@ -47,7 +47,6 @@ export default function AdminPage() {
   const [defaultQuotaType, setDefaultQuotaType] = useState<'limited' | 'unlimited'>('limited');
   const [imageQuotaLimit, setImageQuotaLimit] = useState('100');
   const [videoQuotaLimit, setVideoQuotaLimit] = useState('50');
-  const [editQuotaLimit, setEditQuotaLimit] = useState('100');
   const [bulkCreateLoading, setBulkCreateLoading] = useState(false);
 
   // Inline editing state
@@ -130,20 +129,15 @@ export default function AdminPage() {
       if (defaultQuotaType !== 'unlimited') {
         defaultQuotas.image = {
           type: defaultQuotaType,
-          limit: parseInt(imageQuotaLimit) || 50,
+          limit: parseInt(imageQuotaLimit) || 100,
         };
         defaultQuotas.video = {
           type: defaultQuotaType,
-          limit: parseInt(videoQuotaLimit) || 10,
-        };
-        defaultQuotas.edit = {
-          type: defaultQuotaType,
-          limit: parseInt(editQuotaLimit) || 30,
+          limit: parseInt(videoQuotaLimit) || 50,
         };
       } else {
         defaultQuotas.image = { type: 'unlimited', limit: null };
         defaultQuotas.video = { type: 'unlimited', limit: null };
-        defaultQuotas.edit = { type: 'unlimited', limit: null };
       }
 
       const response = await apiFetch('/api/admin/users/bulk-create', {
@@ -162,7 +156,6 @@ export default function AdminPage() {
       setBulkEmails('');
       setImageQuotaLimit('100');
       setVideoQuotaLimit('50');
-      setEditQuotaLimit('100');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create users');
     } finally {
@@ -212,10 +205,13 @@ export default function AdminPage() {
   const handleSaveQuota = async (userId: string, generationType: string) => {
     try {
       const quotaUpdate = editingQuotas[userId]?.[generationType];
-      if (!quotaUpdate) return;
+      if (!quotaUpdate || !quotaUpdate.hasChanges) return;
 
       const quotas: Record<string, any> = {
-        [generationType]: quotaUpdate,
+        [generationType]: {
+          type: quotaUpdate.type,
+          limit: quotaUpdate.limit,
+        },
       };
 
       const response = await apiFetch(`/api/admin/quotas/${userId}`, {
@@ -245,20 +241,29 @@ export default function AdminPage() {
     }
   };
 
-  const startEditingQuota = (userId: string, generationType: string, quota: Quota) => {
+  const updateQuotaValue = (userId: string, generationType: string, field: 'type' | 'limit', value: any, originalQuota: Quota) => {
+    const currentEdit = editingQuotas[userId]?.[generationType] || {
+      type: originalQuota.quotaType,
+      limit: originalQuota.quotaLimit,
+      hasChanges: false,
+    };
+
+    const newValue = {
+      ...currentEdit,
+      [field]: value,
+      hasChanges: true,
+    };
+
     setEditingQuotas({
       ...editingQuotas,
       [userId]: {
         ...(editingQuotas[userId] || {}),
-        [generationType]: {
-          type: quota.quotaType,
-          limit: quota.quotaLimit,
-        },
+        [generationType]: newValue,
       },
     });
   };
 
-  const cancelEditingQuota = (userId: string, generationType: string) => {
+  const cancelQuotaEdit = (userId: string, generationType: string) => {
     const newEditing = { ...editingQuotas };
     if (newEditing[userId]) {
       delete newEditing[userId][generationType];
@@ -267,19 +272,6 @@ export default function AdminPage() {
       }
     }
     setEditingQuotas(newEditing);
-  };
-
-  const updateEditingQuota = (userId: string, generationType: string, field: 'type' | 'limit', value: any) => {
-    setEditingQuotas({
-      ...editingQuotas,
-      [userId]: {
-        ...(editingQuotas[userId] || {}),
-        [generationType]: {
-          ...(editingQuotas[userId]?.[generationType] || {}),
-          [field]: value,
-        },
-      },
-    });
   };
 
   const getQuotaByType = (quotas: Quota[], type: string): Quota | null => {
@@ -348,27 +340,20 @@ export default function AdminPage() {
               />
 
               {defaultQuotaType !== 'unlimited' && (
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 gap-4">
                   <Input
-                    label="Image Quota"
+                    label="Image Quota (includes image editing)"
                     type="number"
                     value={imageQuotaLimit}
                     onChange={(e) => setImageQuotaLimit(e.target.value)}
-                    min="1"
+                    min="0"
                   />
                   <Input
-                    label="Video Quota"
+                    label="Video Quota (includes video editing)"
                     type="number"
                     value={videoQuotaLimit}
                     onChange={(e) => setVideoQuotaLimit(e.target.value)}
-                    min="1"
-                  />
-                  <Input
-                    label="Edit Quota"
-                    type="number"
-                    value={editQuotaLimit}
-                    onChange={(e) => setEditQuotaLimit(e.target.value)}
-                    min="1"
+                    min="0"
                   />
                 </div>
               )}
@@ -414,12 +399,15 @@ export default function AdminPage() {
                   </th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                     Image Quota
+                    <div className="text-[10px] font-normal text-gray-500 dark:text-gray-400 normal-case mt-0.5">
+                      (includes editing)
+                    </div>
                   </th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                     Video Quota
-                  </th>
-                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
-                    Edit Quota
+                    <div className="text-[10px] font-normal text-gray-500 dark:text-gray-400 normal-case mt-0.5">
+                      (includes editing)
+                    </div>
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                     Actions
@@ -430,7 +418,6 @@ export default function AdminPage() {
                 {users.map((usr) => {
                   const imageQuota = getQuotaByType(usr.quotas, 'image');
                   const videoQuota = getQuotaByType(usr.quotas, 'video');
-                  const editQuota = getQuotaByType(usr.quotas, 'edit');
 
         return (
                     <tr
@@ -480,11 +467,6 @@ export default function AdminPage() {
                         {renderQuotaCell(usr.id, 'video', videoQuota)}
                       </td>
 
-                      {/* Edit Quota */}
-                      <td className="px-4 py-4">
-                        {renderQuotaCell(usr.id, 'edit', editQuota)}
-                      </td>
-
                       {/* Actions */}
                       <td className="px-4 py-4">
                         <div className="flex items-center justify-end gap-2">
@@ -514,69 +496,30 @@ export default function AdminPage() {
   );
 
   function renderQuotaCell(userId: string, type: string, quota: Quota | null) {
-    const isEditing = editingQuotas[userId]?.[type] !== undefined;
-    const editData = editingQuotas[userId]?.[type];
-
     if (!quota) {
       return (
         <div className="text-center text-xs text-gray-400 dark:text-gray-500">No quota</div>
       );
     }
 
-    if (isEditing) {
-      return (
-        <div className="flex flex-col items-center gap-2">
-          <select
-            aria-label={`${type} quota type`}
-            className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 w-24"
-            value={editData.type}
-            onChange={(e) => updateEditingQuota(userId, type, 'type', e.target.value)}
-          >
-            <option value="limited">Limited</option>
-            <option value="unlimited">Unlimited</option>
-          </select>
-          {editData.type !== 'unlimited' && (
-                        <input
-              type="number"
-              aria-label={`${type} quota limit`}
-              className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 w-20"
-              value={editData.limit !== undefined ? editData.limit : ''}
-              onChange={(e) => updateEditingQuota(userId, type, 'limit', e.target.value === '' ? 0 : parseInt(e.target.value))}
-              min="0"
-            />
-          )}
-          <div className="flex gap-1">
-            <button
-              onClick={() => handleSaveQuota(userId, type)}
-              className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
-            >
-              Save
-            </button>
-            <button
-              onClick={() => cancelEditingQuota(userId, type)}
-              className="px-2 py-1 text-xs bg-gray-500 text-white rounded hover:bg-gray-600"
-            >
-              Cancel
-            </button>
-                    </div>
-                  </div>
-                );
-    }
+    const editData = editingQuotas[userId]?.[type];
+    const currentType = editData?.type ?? quota.quotaType;
+    const currentLimit = editData?.limit ?? quota.quotaLimit;
+    const hasChanges = editData?.hasChanges ?? false;
 
-    // Display mode
-    const isUnlimited = quota.quotaType === 'unlimited';
-    const usedPercentage = quota.quotaLimit ? (quota.quotaUsed / quota.quotaLimit) * 100 : 0;
+    // Always show editable inputs
+    const isUnlimited = currentType === 'unlimited';
+    const usedPercentage = quota.quotaLimit && !isUnlimited ? (quota.quotaUsed / quota.quotaLimit) * 100 : 0;
     const isLow = usedPercentage >= 80;
 
     return (
-      <div className="flex flex-col items-center gap-1">
-        {isUnlimited ? (
-          <div className="text-sm font-semibold text-green-600 dark:text-green-400">∞</div>
-        ) : (
+      <div className="flex flex-col items-center gap-1.5 py-1">
+        {/* Usage Display */}
+        {!isUnlimited ? (
           <>
             <div className="text-xs font-medium text-gray-900 dark:text-white">
-              {quota.quotaUsed} / {quota.quotaLimit}
-            </div>
+              {quota.quotaUsed} / {currentLimit ?? 0}
+                      </div>
             <div className="w-20 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
               <div
                 className={`h-full transition-all ${
@@ -586,16 +529,51 @@ export default function AdminPage() {
               />
             </div>
           </>
+        ) : (
+          <div className="text-sm font-semibold text-green-600 dark:text-green-400">∞</div>
         )}
-        <div className="text-xs text-gray-500 dark:text-gray-400">
-          Total: {quota.quotaType === 'unlimited' ? '∞' : quota.quotaLimit}
-        </div>
-        <button
-          onClick={() => startEditingQuota(userId, type, quota)}
-          className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+
+        {/* Editable Controls */}
+              <select
+          aria-label={`${type} quota type`}
+          className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 w-24 hover:border-blue-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          value={currentType}
+          onChange={(e) => updateQuotaValue(userId, type, 'type', e.target.value, quota)}
         >
-          Edit
-        </button>
+          <option value="limited">Limited</option>
+          <option value="unlimited">Unlimited</option>
+              </select>
+
+        {currentType !== 'unlimited' && (
+          <input
+            type="number"
+            aria-label={`${type} quota limit`}
+            className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 w-20 text-center hover:border-blue-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            value={currentLimit !== null && currentLimit !== undefined ? currentLimit : ''}
+            onChange={(e) => updateQuotaValue(userId, type, 'limit', e.target.value === '' ? 0 : parseInt(e.target.value), quota)}
+            min="0"
+          />
+        )}
+
+        {/* Save/Cancel buttons - only show when there are changes */}
+        {hasChanges && (
+          <div className="flex gap-1">
+            <button
+              onClick={() => handleSaveQuota(userId, type)}
+              className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+              title="Save changes"
+            >
+              ✓ Save
+            </button>
+            <button
+              onClick={() => cancelQuotaEdit(userId, type)}
+              className="px-2 py-1 text-xs bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
+              title="Cancel changes"
+            >
+              ✕
+            </button>
+            </div>
+        )}
     </div>
   );
   }

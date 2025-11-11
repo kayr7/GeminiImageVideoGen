@@ -85,9 +85,8 @@ export default function Home() {
           Gemini Creative Playground
         </h1>
         <p className="text-xl text-gray-600 dark:text-gray-300 max-w-3xl mx-auto">
-          Explore the power of Google&apos;s Gemini AI with interactive tools for
-          image and video generation. Perfect for students, educators,
-          and creative enthusiasts.
+          Explore the power of GenAI with interactive tools for
+          image and video generation. 
         </p>
 
         {!initialising && token && (

@@ -170,6 +170,42 @@ MIGRATIONS: list[tuple[int, Iterable[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_user_quotas_reset ON user_quotas(quota_reset_at)",
         ),
     ),
+    (
+        5,
+        (
+            # Simplify to only image and video quotas (edit counts towards image/video)
+            # Remove 'edit' generation type, only allow 'image' and 'video'
+            """
+            CREATE TABLE IF NOT EXISTS user_quotas_new (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                generation_type TEXT NOT NULL CHECK (generation_type IN ('image', 'video')),
+                quota_type TEXT NOT NULL CHECK (quota_type IN ('daily', 'weekly', 'limited', 'unlimited')),
+                quota_limit INTEGER,
+                quota_used INTEGER DEFAULT 0,
+                quota_reset_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """,
+            # Copy only image and video quotas (drop edit quotas)
+            """
+            INSERT INTO user_quotas_new (id, user_id, generation_type, quota_type, quota_limit, quota_used, quota_reset_at, created_at, updated_at)
+            SELECT id, user_id, generation_type, quota_type, quota_limit, quota_used, quota_reset_at, created_at, updated_at
+            FROM user_quotas
+            WHERE generation_type IN ('image', 'video')
+            """,
+            # Drop old table
+            "DROP TABLE user_quotas",
+            # Rename new table
+            "ALTER TABLE user_quotas_new RENAME TO user_quotas",
+            # Recreate indexes
+            "CREATE INDEX IF NOT EXISTS idx_user_quotas_user_id ON user_quotas(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_user_quotas_type ON user_quotas(user_id, generation_type)",
+            "CREATE INDEX IF NOT EXISTS idx_user_quotas_reset ON user_quotas(quota_reset_at)",
+        ),
+    ),
 ]
 
 _db_initialized = False
