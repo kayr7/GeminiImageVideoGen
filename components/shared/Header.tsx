@@ -6,7 +6,6 @@ import { usePathname } from 'next/navigation';
 
 import { useAuth } from '@/lib/context/AuthContext';
 
-import UsageDisplay from './UsageDisplay';
 
 export default function Header() {
   const pathname = usePathname();
@@ -101,9 +100,6 @@ export default function Header() {
 
           {/* Usage Display */}
           <div className="flex items-center space-x-3">
-            <div className="hidden lg:block">
-              <UsageDisplay />
-            </div>
 
             {!initialising && token && (
               <div className="hidden md:flex items-center space-x-3">
