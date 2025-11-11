@@ -54,7 +54,6 @@ const baseCandidates = dedupe(
   [
     process.env.NEXT_PUBLIC_API_URL,
     process.env.NEXT_PUBLIC_BASE_PATH,
-    '/HdMImageVideo',
     '',
   ].map((value) => normaliseBaseUrl(value))
 );

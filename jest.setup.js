@@ -3,7 +3,7 @@ import '@testing-library/jest-dom';
 
 // Mock environment variables for tests
 process.env.GEMINI_API_KEY = 'test-api-key';
-process.env.NEXT_PUBLIC_BASE_PATH = '/HdMImageVideo';
+process.env.NEXT_PUBLIC_BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 
 // Mock fetch globally
 global.fetch = jest.fn();
