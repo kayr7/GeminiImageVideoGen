@@ -1,107 +1,204 @@
-"""
-Video job queue system for tracking video generation jobs
-"""
-import os
+"""Video job queue system for tracking video generation jobs."""
+
 import json
 import uuid
 from datetime import datetime
-from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-# Storage configuration
-STORAGE_DIR = Path(__file__).parent.parent / ".video-jobs"
-JOBS_FILE = STORAGE_DIR / "jobs.json"
+from utils.database import get_connection, initialize_database
+
 
 class VideoQueue:
+    """Persist video generation job state in SQLite."""
+
     def __init__(self):
-        self.jobs = {}
-        self._ensure_directory()
-        self._load_jobs()
-    
-    def _ensure_directory(self):
-        """Create storage directory if it doesn't exist"""
-        STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-    
-    def _load_jobs(self):
-        """Load jobs from disk"""
-        if JOBS_FILE.exists():
+        initialize_database()
+
+    def _row_to_job(self, row) -> Dict[str, Any]:
+        details: Optional[Dict[str, Any]] = None
+        if row["details"]:
             try:
-                with open(JOBS_FILE, 'r') as f:
-                    data = json.load(f)
-                    self.jobs = {
-                        job_id: {**job, "createdAt": datetime.fromisoformat(job["createdAt"]), "updatedAt": datetime.fromisoformat(job["updatedAt"])}
-                        for job_id, job in data.items()
-                    }
-                print(f"Loaded {len(self.jobs)} video jobs from storage")
-            except Exception as e:
-                print(f"Error loading video jobs: {e}")
-                self.jobs = {}
-    
-    def _save_jobs(self):
-        """Save jobs to disk"""
-        try:
-            data = {
-                job_id: {**job, "createdAt": job["createdAt"].isoformat(), "updatedAt": job["updatedAt"].isoformat()}
-                for job_id, job in self.jobs.items()
-            }
-            with open(JOBS_FILE, 'w') as f:
-                json.dump(data, f, indent=2)
-        except Exception as e:
-            print(f"Error saving video jobs: {e}")
-    
-    def create_job(self, data: dict) -> dict:
-        """Create a new job"""
-        job_id = str(uuid.uuid4())
+                details = json.loads(row["details"])
+            except json.JSONDecodeError:
+                details = None
+
         job = {
-            "id": job_id,
-            "userId": data.get("userId", "anonymous"),
-            "prompt": data.get("prompt", ""),
-            "model": data.get("model", "veo-3.1-fast-generate-preview"),
-            "mode": data.get("mode", "text"),
-            "status": data.get("status", "pending"),
-            "progress": data.get("progress", 0),
-            "createdAt": datetime.now(),
-            "updatedAt": datetime.now()
+            "id": row["id"],
+            "jobId": row["job_id"] or row["id"],
+            "operationId": row["operation_id"],
+            "userId": row["user_id"],
+            "prompt": row["prompt"] or "",
+            "model": row["model"] or "",
+            "mode": row["mode"],
+            "status": row["status"],
+            "progress": row["progress"],
+            "error": row["error"],
+            "details": details,
+            "videoUrl": row["video_url"],
+            "videoData": row["video_data"],
+            "mediaId": row["media_id"],
+            "createdAt": datetime.fromisoformat(row["created_at"]),
+            "updatedAt": datetime.fromisoformat(row["updated_at"]),
         }
-        
-        self.jobs[job_id] = job
-        self._save_jobs()
-        
+
+        if row["completed_at"]:
+            job["completedAt"] = datetime.fromisoformat(row["completed_at"])
+
         return job
-    
-    def update_job(self, job_id: str, updates: dict) -> dict:
-        """Update a job"""
-        if job_id not in self.jobs:
+
+    def create_job(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create and persist a new job."""
+        internal_id = data.get("id") or data.get("jobId") or str(uuid.uuid4())
+        external_job_id = data.get("jobId") or internal_id
+        operation_id = data.get("operationId")
+        if not operation_id and data.get("jobId") and data["jobId"] != internal_id:
+            operation_id = data["jobId"]
+
+        now = datetime.now().isoformat()
+        details_json = json.dumps(data.get("details")) if data.get("details") is not None else None
+
+        with get_connection() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO video_jobs (
+                    id, job_id, operation_id, user_id, prompt, model, mode,
+                    status, progress, error, details, video_url, video_data,
+                    media_id, created_at, updated_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    internal_id,
+                    external_job_id,
+                    operation_id,
+                    data.get("userId", "anonymous"),
+                    data.get("prompt", ""),
+                    data.get("model", "veo-3.1-fast-generate-preview"),
+                    data.get("mode", "text"),
+                    data.get("status", "pending"),
+                    int(data.get("progress", 0)),
+                    data.get("error"),
+                    details_json,
+                    data.get("videoUrl"),
+                    data.get("videoData"),
+                    data.get("mediaId"),
+                    now,
+                    now,
+                    None,
+                ),
+            )
+            conn.commit()
+
+            row = conn.execute(
+                "SELECT * FROM video_jobs WHERE id = ?",
+                (internal_id,),
+            ).fetchone()
+
+        return self._row_to_job(row)
+
+    def update_job(self, job_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Update persisted job metadata."""
+        internal_id = self._resolve_job_id(job_id)
+        if not internal_id:
             return None
-        
-        self.jobs[job_id].update(updates)
-        self.jobs[job_id]["updatedAt"] = datetime.now()
-        
+
+        fields: List[str] = []
+        values: List[Any] = []
+
+        for key, value in updates.items():
+            if key == "details":
+                fields.append("details = ?")
+                values.append(json.dumps(value) if value is not None else None)
+            elif key in {"status", "prompt", "model", "mode", "error", "videoUrl", "videoData", "mediaId"}:
+                column = {
+                    "status": "status",
+                    "prompt": "prompt",
+                    "model": "model",
+                    "mode": "mode",
+                    "error": "error",
+                    "videoUrl": "video_url",
+                    "videoData": "video_data",
+                    "mediaId": "media_id",
+                }[key]
+                fields.append(f"{column} = ?")
+                values.append(value)
+            elif key == "progress":
+                fields.append("progress = ?")
+                values.append(int(value))
+
+        if not fields:
+            return self.get_job(internal_id)
+
+        fields.append("updated_at = ?")
+        values.append(datetime.now().isoformat())
+
         if updates.get("status") == "completed":
-            self.jobs[job_id]["completedAt"] = datetime.now()
-        
-        self._save_jobs()
-        
-        return self.jobs[job_id]
-    
-    def get_job(self, job_id: str) -> dict:
-        """Get a job by ID"""
-        return self.jobs.get(job_id)
-    
-    def list_jobs(self, user_id: str) -> list:
-        """List all jobs for a user"""
-        user_jobs = [job.copy() for job in self.jobs.values() if job["userId"] == user_id]
-        # Convert datetime objects to ISO format strings for JSON serialization
-        for job in user_jobs:
+            fields.append("completed_at = ?")
+            values.append(datetime.now().isoformat())
+        elif "completedAt" in updates and updates["completedAt"] is None:
+            fields.append("completed_at = ?")
+            values.append(None)
+
+        values.append(internal_id)
+
+        query = f"UPDATE video_jobs SET {', '.join(fields)} WHERE id = ?"
+
+        with get_connection() as conn:
+            conn.execute(query, values)
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM video_jobs WHERE id = ?",
+                (internal_id,),
+            ).fetchone()
+
+        return self._row_to_job(row) if row else None
+
+    def get_job(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Get a job by ID or external reference."""
+        internal_id = self._resolve_job_id(job_id)
+        if not internal_id:
+            return None
+
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM video_jobs WHERE id = ?",
+                (internal_id,),
+            ).fetchone()
+
+        return self._row_to_job(row) if row else None
+
+    def list_jobs(self, user_id: str) -> List[Dict[str, Any]]:
+        """List all jobs for a user ordered by creation time."""
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM video_jobs WHERE user_id = ? ORDER BY datetime(created_at) DESC",
+                (user_id,),
+            ).fetchall()
+
+        jobs = [self._row_to_job(row) for row in rows]
+
+        # Convert datetimes to ISO strings for API responses
+        for job in jobs:
             job["createdAt"] = job["createdAt"].isoformat()
             job["updatedAt"] = job["updatedAt"].isoformat()
             if "completedAt" in job:
                 job["completedAt"] = job["completedAt"].isoformat()
-        # Sort by creation date (newest first)
-        user_jobs.sort(key=lambda x: x["createdAt"], reverse=True)
-        return user_jobs
+
+        return jobs
+
+    def _resolve_job_id(self, job_id: str) -> Optional[str]:
+        """Resolve external identifiers (operation name) to the stored job ID."""
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT id FROM video_jobs WHERE id = ? OR job_id = ? OR operation_id = ?",
+                (job_id, job_id, job_id),
+            ).fetchone()
+
+        return row["id"] if row else None
+
 
 # Singleton instance
 _queue_instance = None
+
 
 def get_video_queue() -> VideoQueue:
     """Get the singleton video queue instance"""

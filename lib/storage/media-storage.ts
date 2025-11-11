@@ -21,6 +21,7 @@ export interface MediaMetadata {
   createdAt: Date;
   fileSize: number;
   mimeType: string;
+  details?: Record<string, unknown> | null;
 }
 
 class MediaStorage {
@@ -115,6 +116,7 @@ class MediaStorage {
       model: string;
       userId: string;
       mimeType?: string;
+      details?: Record<string, unknown> | null;
     }
   ): string {
     // Generate unique ID and filename
@@ -138,6 +140,7 @@ class MediaStorage {
       createdAt: new Date(),
       fileSize: buffer.length,
       mimeType: metadata.mimeType || (type === 'video' ? 'video/mp4' : 'image/png'),
+      details: metadata.details ?? null,
     };
 
     this.metadata.push(mediaMetadata);

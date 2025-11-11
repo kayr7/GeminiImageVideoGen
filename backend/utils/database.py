@@ -1,0 +1,119 @@
+"""SQLite database utilities for backend storage."""
+from __future__ import annotations
+
+import sqlite3
+import threading
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Iterator, Iterable
+
+DB_DIR = Path(__file__).parent.parent / ".data"
+DB_FILE = DB_DIR / "app.db"
+
+MIGRATIONS: list[tuple[int, Iterable[str]]] = [
+    (
+        1,
+        (
+            """
+            CREATE TABLE IF NOT EXISTS media (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL CHECK (type IN ('image', 'video')),
+                filename TEXT NOT NULL,
+                prompt TEXT,
+                model TEXT,
+                user_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                mime_type TEXT NOT NULL,
+                details TEXT
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_media_user_created_at ON media(user_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_media_type_created_at ON media(type, created_at DESC)",
+            """
+            CREATE TABLE IF NOT EXISTS video_jobs (
+                id TEXT PRIMARY KEY,
+                job_id TEXT,
+                operation_id TEXT,
+                user_id TEXT NOT NULL,
+                prompt TEXT,
+                model TEXT,
+                mode TEXT,
+                status TEXT,
+                progress INTEGER DEFAULT 0,
+                error TEXT,
+                details TEXT,
+                video_url TEXT,
+                video_data TEXT,
+                media_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_video_jobs_user_created_at ON video_jobs(user_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_video_jobs_jobid ON video_jobs(job_id)",
+            "CREATE INDEX IF NOT EXISTS idx_video_jobs_operationid ON video_jobs(operation_id)",
+        ),
+    ),
+]
+
+_db_initialized = False
+_db_lock = threading.Lock()
+
+
+def initialize_database() -> None:
+    """Ensure the SQLite database exists and all migrations are applied."""
+    global _db_initialized
+
+    if _db_initialized:
+        return
+
+    with _db_lock:
+        if _db_initialized:
+            return
+
+        DB_DIR.mkdir(parents=True, exist_ok=True)
+
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY)"
+            )
+
+            applied_versions = {
+                row[0]
+                for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
+            }
+
+            for version, statements in MIGRATIONS:
+                if version in applied_versions:
+                    continue
+
+                for statement in statements:
+                    conn.execute(statement)
+
+                conn.execute(
+                    "INSERT INTO schema_migrations (version) VALUES (?)", (version,)
+                )
+
+            conn.commit()
+        finally:
+            conn.close()
+
+        _db_initialized = True
+
+
+@contextmanager
+def get_connection() -> Iterator[sqlite3.Connection]:
+    """Provide a context-managed SQLite connection with migrations applied."""
+    initialize_database()
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA foreign_keys = ON")
+        yield conn
+    finally:
+        conn.close()
