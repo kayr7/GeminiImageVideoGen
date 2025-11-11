@@ -97,11 +97,10 @@ export default function MediaGallery() {
         throw new Error(message);
       }
 
-      const parsed: MediaItem[] = payload.data.media
-        .map((item) => {
+      const parsed = payload.data.media.reduce<MediaItem[]>((acc, item) => {
           const id = typeof item.id === 'string' ? item.id : '';
           if (!id) {
-            return null;
+            return acc;
           }
 
           const createdAtRaw = typeof item.createdAt === 'string' ? item.createdAt : String(item.createdAt ?? '');
@@ -119,7 +118,7 @@ export default function MediaGallery() {
               }
             : null;
 
-          return {
+          acc.push({
             id,
             type: item.type === 'video' ? 'video' : 'image',
             prompt: isNonEmptyString(item.prompt) ? item.prompt : 'Untitled generation',
@@ -129,9 +128,10 @@ export default function MediaGallery() {
             mimeType: isNonEmptyString(item.mimeType) ? item.mimeType : '',
             url: resolveMediaUrl(isNonEmptyString(item.url) ? item.url : `/api/media/${id}`),
             details,
-          } satisfies MediaItem;
-        })
-        .filter((item): item is MediaItem => item !== null)
+          });
+
+          return acc;
+        }, [])
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
       setMediaItems(parsed);
