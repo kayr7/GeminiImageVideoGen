@@ -430,7 +430,7 @@ interface RateLimitStorage {
 - `sanitizeInput(input: string): string`
 
 **Validation Rules**:
-- Prompt: 1-2000 characters, no HTML tags
+- Prompt: 1-10000 characters, no HTML tags
 - Images: Max 10MB, types: jpg, png, webp
 - Duration: 1-60 seconds for video, 10-300 seconds for music
 
@@ -468,7 +468,7 @@ class RateLimitError extends ApiError {
 **Constants**:
 ```typescript
 export const CONSTANTS = {
-  MAX_PROMPT_LENGTH: 2000,
+  MAX_PROMPT_LENGTH: 10000,
   MAX_FILE_SIZE: 10 * 1024 * 1024, // 10MB
   SUPPORTED_IMAGE_TYPES: ['image/jpeg', 'image/png', 'image/webp'],
   ASPECT_RATIOS: ['1:1', '16:9', '9:16', '4:3', '3:4'],

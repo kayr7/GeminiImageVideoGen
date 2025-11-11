@@ -37,6 +37,12 @@ class MediaStorage:
 
         created_at = datetime.fromisoformat(row["created_at"])
 
+        # Handle ip_address field (may not exist in old database)
+        try:
+            ip_address = row["ip_address"] if "ip_address" in row.keys() else None
+        except (KeyError, IndexError):
+            ip_address = None
+
         return {
             "id": row["id"],
             "type": row["type"],
@@ -48,7 +54,7 @@ class MediaStorage:
             "fileSize": row["file_size"],
             "mimeType": row["mime_type"],
             "details": details,
-            "ipAddress": row.get("ip_address"),  # May be None for old entries
+            "ipAddress": ip_address,  # May be None for old entries or before migration
         }
 
     def save_media(self, media_type: str, base64_data: str, metadata: dict) -> str:

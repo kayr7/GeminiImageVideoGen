@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updated in both frontend validation and backend API models
   - Minimum length remains 1-3 characters
 
+### Fixed
+- **Gallery Loading Error** 🔧
+  - Fixed SQLite Row object access issue in media storage
+  - Changed from `.get()` method to proper dictionary-style access
+  - Added proper handling for missing `ip_address` field in old database entries
+  - Gallery now loads successfully even with entries created before IP tracking migration
+
 ---
 
 ## [2.0.6] - 2025-11-11
