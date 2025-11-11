@@ -25,7 +25,7 @@ export default function LoginPage() {
 function LoginPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { login, setPassword, token, initialising } = useAuth();
+  const { login, setPassword: authSetPassword, token, initialising } = useAuth();
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -105,7 +105,7 @@ function LoginPageContent() {
     setLoading(true);
 
     try {
-      await setPassword(passwordSetupEmail, newPassword);
+      await authSetPassword(passwordSetupEmail, newPassword);
       router.replace(redirectTo);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to set password');
