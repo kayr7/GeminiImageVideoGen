@@ -73,10 +73,11 @@ def main():
             existing_user.id,
             password=admin_password,
             is_active=True,
-            is_admin=True,
             require_password_reset=False,
         )
         print("   ✓ Admin user updated successfully")
+        
+        # Note: is_admin cannot be changed via update_user (by design)
 
     else:
         print("   → User does not exist, creating new admin user...")
