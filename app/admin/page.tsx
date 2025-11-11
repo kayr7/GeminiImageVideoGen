@@ -44,10 +44,10 @@ export default function AdminPage() {
   // Bulk creation state
   const [showBulkCreate, setShowBulkCreate] = useState(false);
   const [bulkEmails, setBulkEmails] = useState('');
-  const [defaultQuotaType, setDefaultQuotaType] = useState<'daily' | 'weekly' | 'unlimited'>('daily');
-  const [imageQuotaLimit, setImageQuotaLimit] = useState('50');
-  const [videoQuotaLimit, setVideoQuotaLimit] = useState('10');
-  const [editQuotaLimit, setEditQuotaLimit] = useState('30');
+  const [defaultQuotaType, setDefaultQuotaType] = useState<'limited' | 'unlimited'>('limited');
+  const [imageQuotaLimit, setImageQuotaLimit] = useState('100');
+  const [videoQuotaLimit, setVideoQuotaLimit] = useState('50');
+  const [editQuotaLimit, setEditQuotaLimit] = useState('100');
   const [bulkCreateLoading, setBulkCreateLoading] = useState(false);
 
   // Inline editing state
@@ -77,7 +77,7 @@ export default function AdminPage() {
       setError(null);
 
       const response = await apiFetch('/api/admin/users');
-      if (!response.ok) {
+        if (!response.ok) {
         throw new Error('Failed to load users');
       }
 
@@ -103,12 +103,12 @@ export default function AdminPage() {
         );
         setUsers(usersWithQuotas);
       }
-    } catch (err) {
+      } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load users');
-    } finally {
-      setLoading(false);
-    }
-  };
+      } finally {
+        setLoading(false);
+      }
+    };
 
   const handleBulkCreate = async () => {
     try {
@@ -160,9 +160,9 @@ export default function AdminPage() {
       await loadUsers();
       setShowBulkCreate(false);
       setBulkEmails('');
-      setImageQuotaLimit('50');
-      setVideoQuotaLimit('10');
-      setEditQuotaLimit('30');
+      setImageQuotaLimit('100');
+      setVideoQuotaLimit('50');
+      setEditQuotaLimit('100');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create users');
     } finally {
@@ -301,7 +301,7 @@ export default function AdminPage() {
     return null;
   }
 
-  return (
+    return (
     <div className="max-w-full mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
@@ -342,8 +342,7 @@ export default function AdminPage() {
                 value={defaultQuotaType}
                 onChange={(e) => setDefaultQuotaType(e.target.value as any)}
                 options={[
-                  { value: 'daily', label: 'Daily (resets at midnight UTC)' },
-                  { value: 'weekly', label: 'Weekly (resets Monday)' },
+                  { value: 'limited', label: 'Limited (total usage quota)' },
                   { value: 'unlimited', label: 'Unlimited (no restrictions)' },
                 ]}
               />
@@ -433,14 +432,14 @@ export default function AdminPage() {
                   const videoQuota = getQuotaByType(usr.quotas, 'video');
                   const editQuota = getQuotaByType(usr.quotas, 'edit');
 
-                  return (
+        return (
                     <tr
                       key={usr.id}
                       className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
                     >
                       {/* User Info */}
                       <td className="px-4 py-4">
-                        <div>
+              <div>
                           <p className="text-sm font-medium text-gray-900 dark:text-white">{usr.email}</p>
                           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                             Created: {new Date(usr.createdAt).toLocaleDateString()}
@@ -467,8 +466,8 @@ export default function AdminPage() {
                             <span className="inline-block px-2 py-0.5 text-xs font-semibold bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 rounded w-fit">
                               Shared
                             </span>
-                          )}
-                        </div>
+                )}
+              </div>
                       </td>
 
                       {/* Image Quota */}
@@ -508,10 +507,10 @@ export default function AdminPage() {
                 })}
               </tbody>
             </table>
-          </div>
+            </div>
         )}
-      </div>
-    </div>
+                      </div>
+                    </div>
   );
 
   function renderQuotaCell(userId: string, type: string, quota: Quota | null) {
@@ -533,18 +532,17 @@ export default function AdminPage() {
             value={editData.type}
             onChange={(e) => updateEditingQuota(userId, type, 'type', e.target.value)}
           >
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
+            <option value="limited">Limited</option>
             <option value="unlimited">Unlimited</option>
           </select>
           {editData.type !== 'unlimited' && (
-            <input
+                        <input
               type="number"
               aria-label={`${type} quota limit`}
               className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 w-20"
-              value={editData.limit || ''}
-              onChange={(e) => updateEditingQuota(userId, type, 'limit', parseInt(e.target.value) || 0)}
-              min="1"
+              value={editData.limit !== undefined ? editData.limit : ''}
+              onChange={(e) => updateEditingQuota(userId, type, 'limit', e.target.value === '' ? 0 : parseInt(e.target.value))}
+              min="0"
             />
           )}
           <div className="flex gap-1">
@@ -560,9 +558,9 @@ export default function AdminPage() {
             >
               Cancel
             </button>
-          </div>
-        </div>
-      );
+                    </div>
+                  </div>
+                );
     }
 
     // Display mode
@@ -589,8 +587,8 @@ export default function AdminPage() {
             </div>
           </>
         )}
-        <div className="text-xs text-gray-500 dark:text-gray-400 capitalize">
-          {quota.quotaType}
+        <div className="text-xs text-gray-500 dark:text-gray-400">
+          Total: {quota.quotaType === 'unlimited' ? '∞' : quota.quotaLimit}
         </div>
         <button
           onClick={() => startEditingQuota(userId, type, quota)}
@@ -598,7 +596,7 @@ export default function AdminPage() {
         >
           Edit
         </button>
-      </div>
-    );
+    </div>
+  );
   }
 }

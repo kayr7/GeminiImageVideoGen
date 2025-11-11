@@ -83,7 +83,7 @@ export default function QuotaDisplay({ generationType, className = '' }: QuotaDi
               {generationType === 'image' ? '🖼️ Image' : generationType === 'video' ? '🎬 Video' : '✏️ Edit'} Quota
             </p>
             <p className="text-sm font-bold text-green-700 dark:text-green-300 mt-0.5">
-              Unlimited
+              Unlimited (Total Usage)
             </p>
           </div>
           <div className="text-2xl">♾️</div>
@@ -96,30 +96,6 @@ export default function QuotaDisplay({ generationType, className = '' }: QuotaDi
   const usedPercentage = quota.quotaLimit ? (quota.quotaUsed / quota.quotaLimit) * 100 : 0;
   const isLow = usedPercentage >= 80;
   const isCritical = usedPercentage >= 95;
-
-  // Format reset time
-  const formatResetTime = (resetAt: string | null) => {
-    if (!resetAt) return null;
-    
-    try {
-      const resetDate = new Date(resetAt);
-      const now = new Date();
-      const diffMs = resetDate.getTime() - now.getTime();
-      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-      const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-
-      if (diffHours < 0) return 'Resetting soon...';
-      if (diffHours < 1) return `Resets in ${diffMinutes}m`;
-      if (diffHours < 24) return `Resets in ${diffHours}h`;
-      
-      const diffDays = Math.floor(diffHours / 24);
-      return `Resets in ${diffDays}d`;
-    } catch {
-      return null;
-    }
-  };
-
-  const resetTimeStr = formatResetTime(quota.quotaResetAt);
 
   // Color scheme based on usage
   const colorScheme = isCritical
@@ -151,7 +127,6 @@ export default function QuotaDisplay({ generationType, className = '' }: QuotaDi
 
   const icon = generationType === 'image' ? '🖼️' : generationType === 'video' ? '🎬' : '✏️';
   const typeLabel = generationType === 'image' ? 'Image' : generationType === 'video' ? 'Video' : 'Edit';
-  const quotaTypeLabel = quota.quotaType === 'daily' ? 'Daily' : quota.quotaType === 'weekly' ? 'Weekly' : '';
 
   return (
     <div className={`p-3 ${colorScheme.bg} border ${colorScheme.border} rounded-lg ${className}`}>
@@ -160,7 +135,7 @@ export default function QuotaDisplay({ generationType, className = '' }: QuotaDi
         <div className="flex items-center justify-between">
           <div>
             <p className={`text-xs font-medium ${colorScheme.text}`}>
-              {icon} {typeLabel} Quota {quotaTypeLabel && `(${quotaTypeLabel})`}
+              {icon} {typeLabel} Quota (Total Usage)
             </p>
             <p className={`text-sm font-bold ${colorScheme.used} mt-0.5`}>
               {quota.quotaUsed} / {quota.quotaLimit} used
@@ -179,17 +154,15 @@ export default function QuotaDisplay({ generationType, className = '' }: QuotaDi
           />
         </div>
 
-        {/* Footer */}
-        {resetTimeStr && (
-          <p className={`text-xs ${colorScheme.used}`}>
-            {resetTimeStr}
-          </p>
-        )}
-
         {/* Warning Message */}
         {isCritical && (
           <p className="text-xs text-red-700 dark:text-red-300 font-medium">
             ⚠️ Quota almost exhausted! Contact your admin if you need more.
+          </p>
+        )}
+        {quota.quotaLimit === 0 && (
+          <p className="text-xs text-red-700 dark:text-red-300 font-medium">
+            ⚠️ Your quota is set to 0. Contact your administrator.
           </p>
         )}
       </div>

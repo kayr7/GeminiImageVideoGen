@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.1.0] - 2025-11-11
+
+### Changed
+- **Quota System Simplified** 📊
+  - Switched from time-based quotas (daily/weekly) to **total usage quotas**
+  - Quota types now: `limited` (total count) or `unlimited` (no restrictions)
+  - Removed automatic time-based resets - quotas are manually reset by admins
+  - Default quotas updated: Image: 100, Video: 50, Edit: 100 (total)
+  - Files: `backend/utils/quota_manager.py`, `backend/utils/database.py` (migration #4)
+
+- **Admin Dashboard Redesigned** 🎨
+  - Single table view with all users and quotas visible at once
+  - Inline quota editing - click "Edit" → change values → "Save"
+  - Visual progress bars for quota usage (red when > 80%)
+  - Quick actions in each row (Activate/Deactivate, Reset Password)
+  - Quota display shows "Total: X" instead of time period
+  - File: `app/admin/page.tsx`
+
+### Fixed
+- **0 Quota Enforcement** 🔧
+  - Fixed bug where setting quota to 0 wasn't respected
+  - Now shows specific error: "Your {type} quota is set to 0. Contact your administrator."
+  - Quota input field now accepts 0 as valid value (`min="0"`)
+  - Files: `backend/utils/quota_manager.py`, `app/admin/page.tsx`
+
+### Updated
+- **Quota Display Component** 📱
+  - Removed reset time display (no longer applicable)
+  - Updated labels to show "(Total Usage)" instead of time period
+  - Added specific warning for 0 quotas
+  - Simplified logic (no more time calculations)
+  - File: `components/generators/QuotaDisplay.tsx`
+
+- **Database Schema** 🗄️
+  - Migration #4: Updated `user_quotas` table CHECK constraint
+  - Now accepts: 'daily', 'weekly', 'limited', 'unlimited'
+  - Preserves all existing quota data
+  - File: `backend/utils/database.py`
+
+### Migration Notes
+- Existing 'daily' and 'weekly' quotas still work but won't auto-reset
+- New users get 'limited' quota type by default
+- Admins can manually convert old quotas to 'limited' type
+- See `QUOTA-SYSTEM-UPDATE.md` for detailed migration guide
+
+---
+
 ## [3.0.0] - 2025-11-11
 
 ### Added

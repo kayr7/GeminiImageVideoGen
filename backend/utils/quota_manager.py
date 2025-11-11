@@ -1,9 +1,9 @@
-"""Quota management system for user generation limits."""
+"""Quota management system for user generation limits - Total usage based."""
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional, Dict, List, Any
 
 from .database import get_connection
@@ -17,10 +17,10 @@ class Quota:
         id: str,
         user_id: str,
         generation_type: str,
-        quota_type: str,
+        quota_type: str,  # Now just 'limited' or 'unlimited'
         quota_limit: Optional[int],
         quota_used: int,
-        quota_reset_at: Optional[str],
+        quota_reset_at: Optional[str],  # Not used anymore but kept for DB compatibility
         created_at: str,
         updated_at: str,
     ):
@@ -48,44 +48,21 @@ class Quota:
             "quotaLimit": self.quota_limit,
             "quotaUsed": self.quota_used,
             "quotaRemaining": remaining,
-            "quotaResetAt": self.quota_reset_at,
+            "quotaResetAt": None,  # No longer used
             "createdAt": self.created_at,
             "updatedAt": self.updated_at,
         }
 
 
 class QuotaManager:
-    """Manages user quotas."""
+    """Manages user quotas - Total usage based (not time-based)."""
 
     # Default quotas for new users
     DEFAULT_QUOTAS = {
-        "image": {"type": "daily", "limit": 50},
-        "video": {"type": "daily", "limit": 10},
-        "edit": {"type": "daily", "limit": 30},
+        "image": {"type": "limited", "limit": 100},
+        "video": {"type": "limited", "limit": 50},
+        "edit": {"type": "limited", "limit": 100},
     }
-
-    @staticmethod
-    def _calculate_reset_time(quota_type: str) -> str:
-        """Calculate the next reset time based on quota type."""
-        now = datetime.utcnow()
-
-        if quota_type == "daily":
-            # Reset at midnight UTC
-            next_reset = now.replace(
-                hour=0, minute=0, second=0, microsecond=0
-            ) + timedelta(days=1)
-        elif quota_type == "weekly":
-            # Reset on Monday at midnight UTC
-            days_until_monday = (7 - now.weekday()) % 7
-            if days_until_monday == 0:
-                days_until_monday = 7
-            next_reset = now.replace(
-                hour=0, minute=0, second=0, microsecond=0
-            ) + timedelta(days=days_until_monday)
-        else:  # unlimited
-            return None
-
-        return next_reset.isoformat()
 
     @staticmethod
     def create_quota(
@@ -97,7 +74,12 @@ class QuotaManager:
         """Create a new quota for a user."""
         now = datetime.utcnow().isoformat()
         quota_id = str(uuid.uuid4())
-        quota_reset_at = QuotaManager._calculate_reset_time(quota_type)
+
+        # Validate quota limit
+        if quota_type == "unlimited":
+            quota_limit = None
+        elif quota_limit is not None and quota_limit < 0:
+            quota_limit = 0
 
         with get_connection() as conn:
             conn.execute(
@@ -113,8 +95,8 @@ class QuotaManager:
                     generation_type,
                     quota_type,
                     quota_limit,
-                    0,
-                    quota_reset_at,
+                    0,  # quota_used starts at 0
+                    None,  # No reset time for total quotas
                     now,
                     now,
                 ),
@@ -125,7 +107,7 @@ class QuotaManager:
 
     @staticmethod
     def get_quota(user_id: str, generation_type: str) -> Optional[Quota]:
-        """Get quota for user and generation type."""
+        """Get quota for a user and generation type."""
         with get_connection() as conn:
             row = conn.execute(
                 """
@@ -155,8 +137,7 @@ class QuotaManager:
         """Get all quotas for a user."""
         with get_connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM user_quotas WHERE user_id = ? ORDER BY generation_type",
-                (user_id,),
+                "SELECT * FROM user_quotas WHERE user_id = ?", (user_id,)
             ).fetchall()
 
             return [
@@ -177,97 +158,59 @@ class QuotaManager:
     @staticmethod
     def check_quota(user_id: str, generation_type: str) -> tuple[bool, Optional[str]]:
         """
-        Check if user has quota remaining for this generation type.
+        Check if user has quota available for a generation.
 
         Returns:
-            Tuple of (has_quota, error_message)
+            (has_quota, error_message)
         """
         quota = QuotaManager.get_quota(user_id, generation_type)
 
         if not quota:
-            # No quota defined = unlimited for now
-            # Could also create default quota here
+            # No quota set, deny by default
+            return False, "No quota configured for this generation type"
+
+        # Unlimited quota
+        if quota.quota_type == "unlimited" or quota.quota_limit is None:
             return True, None
 
-        if quota.quota_type == "unlimited":
-            return True, None
-
-        # Check if quota needs reset
-        if quota.quota_reset_at:
-            reset_time = datetime.fromisoformat(quota.quota_reset_at)
-            if datetime.utcnow() >= reset_time:
-                QuotaManager._reset_quota(quota.id)
-                quota = QuotaManager.get_quota(user_id, generation_type)
-
-        if quota.quota_limit is None:
-            return True, None
-
+        # Check if quota is available
         if quota.quota_used >= quota.quota_limit:
-            reset_info = ""
-            if quota.quota_reset_at:
-                reset_info = f" Resets at {quota.quota_reset_at}"
+            if quota.quota_limit == 0:
+                return False, f"Your {generation_type} quota is set to 0. Contact your administrator."
             return (
                 False,
-                f"Quota exceeded for {generation_type}. Used: {quota.quota_used}/{quota.quota_limit}.{reset_info}",
+                f"Quota exceeded. You have used {quota.quota_used}/{quota.quota_limit} {generation_type} generations.",
             )
 
         return True, None
 
     @staticmethod
-    def increment_quota(user_id: str, generation_type: str):
-        """Increment quota usage after successful generation."""
+    def increment_quota(user_id: str, generation_type: str) -> bool:
+        """
+        Increment the quota usage for a user and generation type.
+
+        Returns:
+            True if incremented successfully, False otherwise
+        """
         quota = QuotaManager.get_quota(user_id, generation_type)
 
         if not quota:
-            # Create default quota if doesn't exist
-            default = QuotaManager.DEFAULT_QUOTAS.get(
-                generation_type, {"type": "unlimited", "limit": None}
-            )
-            QuotaManager.create_quota(
-                user_id,
-                generation_type,
-                default["type"],
-                default["limit"],
-            )
-            quota = QuotaManager.get_quota(user_id, generation_type)
+            return False
 
-        if quota and quota.quota_type != "unlimited":
-            with get_connection() as conn:
-                conn.execute(
-                    """
-                    UPDATE user_quotas
-                    SET quota_used = quota_used + 1, updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (datetime.utcnow().isoformat(), quota.id),
-                )
-                conn.commit()
+        now = datetime.utcnow().isoformat()
 
-    @staticmethod
-    def _reset_quota(quota_id: str):
-        """Reset quota usage and update reset time."""
         with get_connection() as conn:
-            # Get current quota
-            row = conn.execute(
-                "SELECT quota_type FROM user_quotas WHERE id = ?",
-                (quota_id,),
-            ).fetchone()
-
-            if not row:
-                return
-
-            quota_type = row["quota_type"]
-            next_reset = QuotaManager._calculate_reset_time(quota_type)
-
             conn.execute(
                 """
                 UPDATE user_quotas
-                SET quota_used = 0, quota_reset_at = ?, updated_at = ?
-                WHERE id = ?
+                SET quota_used = quota_used + 1, updated_at = ?
+                WHERE user_id = ? AND generation_type = ?
                 """,
-                (next_reset, datetime.utcnow().isoformat(), quota_id),
+                (now, user_id, generation_type),
             )
             conn.commit()
+
+        return True
 
     @staticmethod
     def update_quota(
@@ -276,15 +219,10 @@ class QuotaManager:
         quota_type: Optional[str] = None,
         quota_limit: Optional[int] = None,
     ) -> Optional[Quota]:
-        """Update quota settings."""
+        """Update a quota."""
         quota = QuotaManager.get_quota(user_id, generation_type)
 
         if not quota:
-            # Create new quota
-            if quota_type and quota_limit is not None:
-                return QuotaManager.create_quota(
-                    user_id, generation_type, quota_type, quota_limit
-                )
             return None
 
         updates = []
@@ -293,24 +231,28 @@ class QuotaManager:
         if quota_type is not None:
             updates.append("quota_type = ?")
             params.append(quota_type)
-            # Recalculate reset time
-            updates.append("quota_reset_at = ?")
-            params.append(QuotaManager._calculate_reset_time(quota_type))
 
-        if quota_limit is not None:
+            # If changing to unlimited, set limit to None
+            if quota_type == "unlimited":
+                updates.append("quota_limit = ?")
+                params.append(None)
+
+        if quota_limit is not None and (quota_type != "unlimited" if quota_type else quota.quota_type != "unlimited"):
             updates.append("quota_limit = ?")
-            params.append(quota_limit)
+            # Allow 0 quotas
+            params.append(max(0, quota_limit) if quota_limit >= 0 else quota_limit)
 
         if not updates:
             return quota
 
         updates.append("updated_at = ?")
         params.append(datetime.utcnow().isoformat())
-        params.append(quota.id)
+        params.append(user_id)
+        params.append(generation_type)
 
         with get_connection() as conn:
             conn.execute(
-                f"UPDATE user_quotas SET {', '.join(updates)} WHERE id = ?",
+                f"UPDATE user_quotas SET {', '.join(updates)} WHERE user_id = ? AND generation_type = ?",
                 params,
             )
             conn.commit()
@@ -318,24 +260,53 @@ class QuotaManager:
         return QuotaManager.get_quota(user_id, generation_type)
 
     @staticmethod
-    def set_default_quotas(user_id: str):
-        """Set default quotas for a new user."""
-        for gen_type, settings in QuotaManager.DEFAULT_QUOTAS.items():
-            existing = QuotaManager.get_quota(user_id, gen_type)
-            if not existing:
-                QuotaManager.create_quota(
-                    user_id,
-                    gen_type,
-                    settings["type"],
-                    settings.get("limit"),
-                )
+    def reset_user_quota(user_id: str, generation_type: str) -> bool:
+        """Reset quota usage to 0 for a specific generation type."""
+        now = datetime.utcnow().isoformat()
+
+        with get_connection() as conn:
+            result = conn.execute(
+                """
+                UPDATE user_quotas
+                SET quota_used = 0, updated_at = ?
+                WHERE user_id = ? AND generation_type = ?
+                """,
+                (now, user_id, generation_type),
+            )
+            conn.commit()
+            return result.rowcount > 0
 
     @staticmethod
-    def reset_user_quota(user_id: str, generation_type: str):
-        """Manually reset quota for a user."""
-        quota = QuotaManager.get_quota(user_id, generation_type)
-        if quota:
-            QuotaManager._reset_quota(quota.id)
+    def set_default_quotas(user_id: str, custom_quotas: Optional[Dict[str, Dict[str, Any]]] = None):
+        """
+        Set default quotas for a new user.
+
+        Args:
+            user_id: User ID
+            custom_quotas: Optional custom quota configuration
+                          Format: {"image": {"type": "limited", "limit": 100}, ...}
+        """
+        quotas_to_create = custom_quotas if custom_quotas else QuotaManager.DEFAULT_QUOTAS
+
+        for gen_type, quota_config in quotas_to_create.items():
+            # Check if quota already exists
+            existing = QuotaManager.get_quota(user_id, gen_type)
+            if existing:
+                continue
+
+            quota_type = quota_config.get("type", "limited")
+            quota_limit = quota_config.get("limit")
+
+            # Ensure 0 is respected
+            if quota_type != "unlimited" and quota_limit is not None:
+                quota_limit = max(0, quota_limit)
+
+            QuotaManager.create_quota(
+                user_id=user_id,
+                generation_type=gen_type,
+                quota_type=quota_type,
+                quota_limit=quota_limit,
+            )
 
 
 __all__ = ["Quota", "QuotaManager"]
