@@ -46,11 +46,17 @@ async def generate_image(request: ImageGenerationRequest):
         # Determine if using Nano Banana or Imagen
         is_nano_banana = "flash" in model_name.lower() or "gemini" in model_name.lower()
         
+        if not is_nano_banana and request.referenceImages:
+            raise HTTPException(
+                status_code=400,
+                detail="Reference images are not supported with Imagen models"
+            )
+
         if is_nano_banana:
             # Nano Banana (Gemini 2.5 Flash Image) approach
             # Build contents with prompt and optional reference images
             parts = [request.prompt]
-            
+
             if request.referenceImages:
                 for img_data in request.referenceImages:
                     # Extract base64 data

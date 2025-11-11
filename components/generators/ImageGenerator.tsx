@@ -72,6 +72,20 @@ export default function ImageGenerator() {
     [availableImageModels, model]
   );
 
+  const referenceImagesAllowed = useMemo(() => {
+    if (!selectedModel) {
+      return true;
+    }
+
+    return !selectedModel.id.toLowerCase().includes('imagen');
+  }, [selectedModel]);
+
+  useEffect(() => {
+    if (!referenceImagesAllowed && referenceImages.length > 0) {
+      setReferenceImages([]);
+    }
+  }, [referenceImagesAllowed, referenceImages]);
+
   const imageGenerationEnabled = config ? config.features.imageGeneration : true;
 
   const handleGenerate = async () => {
@@ -100,12 +114,13 @@ export default function ImageGenerator() {
       const response = await fetch(`${API_URL}/api/image/generate`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          prompt,
-          model: model || undefined,
-          aspectRatio,
-          referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
-        }),
+          body: JSON.stringify({
+            prompt,
+            model: model || undefined,
+            aspectRatio,
+            referenceImages:
+              referenceImagesAllowed && referenceImages.length > 0 ? referenceImages : undefined,
+          }),
       });
 
       const data = await response.json();
@@ -249,8 +264,19 @@ export default function ImageGenerator() {
             maxFiles={5}
             onFilesSelect={(files, base64Array) => setReferenceImages(base64Array)}
             preview
-            helperText="Upload multiple images for composition or style transfer"
+            helperText={
+              referenceImagesAllowed
+                ? 'Upload multiple images for composition or style transfer'
+                : undefined
+            }
+            disabled={!referenceImagesAllowed}
           />
+
+          {!referenceImagesAllowed && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              Reference images are not supported with Imagen models.
+            </p>
+          )}
 
           {selectedModel && (
             <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
