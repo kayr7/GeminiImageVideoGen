@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-// Use relative URL that goes through nginx proxy
-const API_URL = process.env.NEXT_PUBLIC_API_URL || '/HdMImageVideo';
+import { apiFetch } from '@/lib/utils/apiClient';
 
 interface BackendUsageResponse {
   success: boolean;
@@ -32,7 +31,7 @@ export default function UsageDisplay() {
 
   const fetchUsage = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/usage/status`);
+      const response = await apiFetch('/api/usage/status');
       if (response.ok) {
         const data = await response.json();
         setUsage(data);

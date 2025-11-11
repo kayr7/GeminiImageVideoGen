@@ -4,17 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import LoadingSpinner from '@/components/shared/LoadingSpinner';
 import { useAuth } from '@/lib/context/AuthContext';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || '/HdMImageVideo';
-
-const normaliseBaseUrl = (base: string): string => {
-  if (!base) {
-    return '';
-  }
-  return base.endsWith('/') ? base.slice(0, -1) : base;
-};
-
-const API_BASE = normaliseBaseUrl(API_URL);
+import { apiFetch, resolveApiUrl } from '@/lib/utils/apiClient';
 
 interface MediaDetails {
   mode?: string;
@@ -62,7 +52,7 @@ const resolveMediaUrl = (rawUrl: string): string => {
     return rawUrl;
   }
   const prefixed = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`;
-  return `${API_BASE}${prefixed}`;
+  return resolveApiUrl(prefixed);
 };
 
 const extractStringArray = (value: unknown): string[] => {
@@ -89,7 +79,7 @@ export default function MediaGallery() {
     setActionError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/api/media/list?limit=200`);
+      const response = await apiFetch('/api/media/list?limit=200');
       const payload = (await response.json()) as MediaListResponse;
 
       if (!response.ok || !payload.success || !payload.data?.media) {
@@ -159,12 +149,12 @@ export default function MediaGallery() {
 
       try {
         setActionError(null);
-        const response = await fetch(`${API_BASE}/api/media/${id}`, {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+      const response = await apiFetch(`/api/media/${id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
         const payload = (await response.json()) as MediaListResponse;
         if (!response.ok || !payload.success) {

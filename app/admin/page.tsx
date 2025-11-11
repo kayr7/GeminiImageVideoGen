@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import Button from '@/components/ui/Button';
 import { useAuth } from '@/lib/context/AuthContext';
+import { apiFetch } from '@/lib/utils/apiClient';
 import type {
   AdminModelConfigResponse,
   AdminCategorySettings,
@@ -11,8 +12,6 @@ import type {
   ModelInfo,
   ModelQuotaConfig,
 } from '@/types';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || '/HdMImageVideo';
 
 type CategoryState = {
   enabled: Set<string>;
@@ -52,7 +51,7 @@ export default function AdminPage() {
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(`${API_URL}/api/admin/models`, {
+        const response = await apiFetch('/api/admin/models', {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -221,7 +220,7 @@ export default function AdminPage() {
         payload.quotas = quotasPayload;
       }
 
-      const response = await fetch(`${API_URL}/api/admin/models/${category}`, {
+      const response = await apiFetch(`/api/admin/models/${category}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
