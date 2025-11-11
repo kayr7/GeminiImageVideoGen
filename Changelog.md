@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.3.0] - 2025-11-11
+
+### Added
+- **User Tagging System** 🏷️
+  - Database migration #6 creates `user_tags` table
+  - Tag management methods in `UserManager` (add, remove, get, set)
+  - Support for multiple tags per user (e.g., "course", "team-a", "department")
+  - Tags are case-insensitive and normalized to lowercase
+  - Pydantic models updated: `BulkCreateUsersRequest`, `UserResponse`, `UpdateUserTagsRequest`
+  - Files: `backend/utils/database.py`, `backend/utils/user_manager.py`, `backend/models.py`
+
+### Status
+- ✅ Backend database and models complete
+- ⏳ API endpoints (in progress)
+- ⏳ Frontend UI (pending)
+
+---
+
 ## [3.2.0] - 2025-11-11
 
 ### Changed

@@ -303,6 +303,118 @@ class UserManager:
             ).fetchall()
             return [row["admin_id"] for row in rows]
 
+    @staticmethod
+    def add_tag(user_id: str, tag: str) -> bool:
+        """
+        Add a tag to a user.
+
+        Args:
+            user_id: User ID
+            tag: Tag to add (case-insensitive, will be lowercased)
+
+        Returns:
+            True if tag was added, False if it already existed
+        """
+        tag = tag.strip().lower()
+        if not tag:
+            return False
+
+        tag_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
+
+        try:
+            with get_connection() as conn:
+                conn.execute(
+                    "INSERT INTO user_tags (id, user_id, tag, created_at) VALUES (?, ?, ?, ?)",
+                    (tag_id, user_id, tag, now),
+                )
+                conn.commit()
+            return True
+        except Exception:
+            # Tag already exists (UNIQUE constraint)
+            return False
+
+    @staticmethod
+    def remove_tag(user_id: str, tag: str) -> bool:
+        """
+        Remove a tag from a user.
+
+        Args:
+            user_id: User ID
+            tag: Tag to remove (case-insensitive)
+
+        Returns:
+            True if tag was removed, False if it didn't exist
+        """
+        tag = tag.strip().lower()
+
+        with get_connection() as conn:
+            result = conn.execute(
+                "DELETE FROM user_tags WHERE user_id = ? AND tag = ?",
+                (user_id, tag),
+            )
+            conn.commit()
+            return result.rowcount > 0
+
+    @staticmethod
+    def get_user_tags(user_id: str) -> List[str]:
+        """
+        Get all tags for a user.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            List of tags (sorted alphabetically)
+        """
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT tag FROM user_tags WHERE user_id = ? ORDER BY tag",
+                (user_id,),
+            ).fetchall()
+            return [row["tag"] for row in rows]
+
+    @staticmethod
+    def set_user_tags(user_id: str, tags: List[str]) -> None:
+        """
+        Set all tags for a user (replaces existing tags).
+
+        Args:
+            user_id: User ID
+            tags: List of tags to set
+        """
+        # Normalize tags
+        normalized_tags = list(set(tag.strip().lower() for tag in tags if tag.strip()))
+
+        with get_connection() as conn:
+            # Remove all existing tags
+            conn.execute("DELETE FROM user_tags WHERE user_id = ?", (user_id,))
+
+            # Add new tags
+            now = datetime.utcnow().isoformat()
+            for tag in normalized_tags:
+                tag_id = str(uuid.uuid4())
+                conn.execute(
+                    "INSERT INTO user_tags (id, user_id, tag, created_at) VALUES (?, ?, ?, ?)",
+                    (tag_id, user_id, tag, now),
+                )
+
+            conn.commit()
+
+    @staticmethod
+    def get_all_tags() -> List[str]:
+        """
+        Get all unique tags across all users.
+
+        Returns:
+            List of all unique tags (sorted alphabetically)
+        """
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT tag FROM user_tags ORDER BY tag"
+            ).fetchall()
+            return [row["tag"] for row in rows]
+
 
 def ensure_env_admin_exists() -> Optional[User]:
     """

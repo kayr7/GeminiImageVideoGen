@@ -183,6 +183,7 @@ class ChangePasswordRequest(BaseModel):
 class BulkCreateUsersRequest(BaseModel):
     emails: List[str] = Field(..., min_items=1)
     defaultQuotas: Optional[Dict[str, Dict[str, Any]]] = None
+    defaultTags: Optional[List[str]] = None
 
 
 class UpdateUserRequest(BaseModel):
@@ -191,6 +192,10 @@ class UpdateUserRequest(BaseModel):
 
 class UpdateQuotasRequest(BaseModel):
     quotas: Dict[str, Dict[str, Any]]  # e.g., {"image": {"type": "daily", "limit": 50}}
+
+
+class UpdateUserTagsRequest(BaseModel):
+    tags: List[str]  # List of tags to set for the user
 
 
 class UserResponse(BaseModel):
@@ -204,6 +209,7 @@ class UserResponse(BaseModel):
     lastLoginAt: Optional[str] = None
     isShared: Optional[bool] = None
     sharedWith: Optional[List[str]] = None
+    tags: Optional[List[str]] = None
 
 
 class QuotaResponse(BaseModel):

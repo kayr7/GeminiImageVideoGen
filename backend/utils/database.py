@@ -206,6 +206,24 @@ MIGRATIONS: list[tuple[int, Iterable[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_user_quotas_reset ON user_quotas(quota_reset_at)",
         ),
     ),
+    (
+        6,
+        (
+            # User tagging system for organizing users into groups
+            """
+            CREATE TABLE IF NOT EXISTS user_tags (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                tag TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE(user_id, tag)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_user_tags_user_id ON user_tags(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_user_tags_tag ON user_tags(tag)",
+        ),
+    ),
 ]
 
 _db_initialized = False
