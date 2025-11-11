@@ -11,10 +11,8 @@ import FileUpload from '../ui/FileUpload';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import { CONSTANTS } from '@/lib/utils/constants';
 import { useAuth } from '@/lib/context/AuthContext';
+import { apiFetch, resolveApiUrl } from '@/lib/utils/apiClient';
 import type { ModelInfo } from '@/types';
-
-// Use relative URL that goes through nginx proxy
-const API_URL = process.env.NEXT_PUBLIC_API_URL || '/HdMImageVideo';
 
 type VideoJob = {
   id: string;
@@ -108,7 +106,7 @@ export default function VideoGenerator() {
       return;
     }
     try {
-      const response = await fetch(`${API_URL}/api/video/jobs`, {
+      const response = await apiFetch('/api/video/jobs', {
         headers: { ...authHeaders },
       });
       const data = await response.json();
@@ -128,7 +126,7 @@ export default function VideoGenerator() {
       return undefined;
     }
     try {
-      const response = await fetch(`${API_URL}/api/video/jobs/${jobId}`, {
+      const response = await apiFetch(`/api/video/jobs/${jobId}`, {
         headers: { ...authHeaders },
       });
       const data = await response.json();
@@ -137,7 +135,7 @@ export default function VideoGenerator() {
         setJobHistory((prev) => prev.map((job) => (job.id === jobId ? updatedJob : job)));
 
         if (updatedJob.status === 'completed' && updatedJob.videoUrl) {
-          setGeneratedVideo(updatedJob.videoUrl);
+          setGeneratedVideo(resolveApiUrl(updatedJob.videoUrl));
           setStatusMessage('Video generation completed!');
         }
 
@@ -161,7 +159,7 @@ export default function VideoGenerator() {
 
     while (attempts < maxAttempts) {
       try {
-        const response = await fetch(`${API_URL}/api/video/status?jobId=${encodeURIComponent(jobId)}`, {
+        const response = await apiFetch(`/api/video/status?jobId=${encodeURIComponent(jobId)}`, {
           headers: { ...authHeaders },
         });
         const data = await response.json();
@@ -172,7 +170,7 @@ export default function VideoGenerator() {
 
         if (data.data.status === 'completed') {
           if (data.data.videoUrl) {
-            setGeneratedVideo(data.data.videoUrl);
+            setGeneratedVideo(resolveApiUrl(data.data.videoUrl));
             setStatusMessage('Video generation completed!');
             return;
           }
@@ -236,7 +234,7 @@ export default function VideoGenerator() {
         requestBody.referenceImages = referenceImages.slice(0, 3); // Max 3
       }
       
-      const response = await fetch(`${API_URL}/api/video/generate`, {
+      const response = await apiFetch('/api/video/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -583,7 +581,7 @@ export default function VideoGenerator() {
                         )}
                         {job.status === 'completed' && job.videoUrl && (
                           <button
-                            onClick={() => setGeneratedVideo(job.videoUrl ?? null)}
+                            onClick={() => setGeneratedVideo(resolveApiUrl(job.videoUrl ?? ''))}
                             className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
                           >
                             View Video

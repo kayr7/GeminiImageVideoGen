@@ -1,10 +1,10 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { apiFetch } from '@/lib/utils/apiClient';
 import type { ApiResponse, LoginConfig, LoginResponse, LoginResponseData, LoginUser } from '@/types';
 
 const STORAGE_KEY = 'gemini-auth-session';
-const API_URL = process.env.NEXT_PUBLIC_API_URL || '/HdMImageVideo';
 
 type AuthContextValue = {
   token: string | null;
@@ -54,7 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchApplicationConfiguration = useCallback(async (): Promise<LoginConfig | null> => {
     try {
-      const response = await fetch(`${API_URL}/api/config`);
+      const response = await apiFetch('/api/config');
       if (!response.ok) {
         throw new Error(`Failed to load configuration: ${response.status}`);
       }
@@ -111,7 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = useCallback<AuthContextValue['login']>(async (username, password) => {
-    const response = await fetch(`${API_URL}/api/auth/login`, {
+    const response = await apiFetch('/api/auth/login', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -10,10 +10,8 @@ import MultiFileUpload from '../ui/MultiFileUpload';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import { CONSTANTS } from '@/lib/utils/constants';
 import { useAuth } from '@/lib/context/AuthContext';
+import { apiFetch, resolveApiUrl } from '@/lib/utils/apiClient';
 import type { ModelInfo } from '@/types';
-
-// Use relative URL that goes through nginx proxy
-const API_URL = process.env.NEXT_PUBLIC_API_URL || '/HdMImageVideo';
 
 export default function ImageGenerator() {
   const { token, config, initialising } = useAuth();
@@ -111,12 +109,12 @@ export default function ImageGenerator() {
         headers.Authorization = `Bearer ${token}`;
       }
 
-      const response = await fetch(`${API_URL}/api/image/generate`, {
+      const response = await apiFetch('/api/image/generate', {
         method: 'POST',
         headers,
-          body: JSON.stringify({
-            prompt,
-            model: model || undefined,
+        body: JSON.stringify({
+          prompt,
+          model: model || undefined,
             aspectRatio,
             referenceImages:
               referenceImagesAllowed && referenceImages.length > 0 ? referenceImages : undefined,
@@ -131,7 +129,7 @@ export default function ImageGenerator() {
 
       // Handle image data
       if (data.data.imageUrl) {
-        setGeneratedImage(data.data.imageUrl);
+        setGeneratedImage(resolveApiUrl(data.data.imageUrl));
       } else if (data.data.imageData) {
         setGeneratedImage(`data:image/png;base64,${data.data.imageData}`);
       } else {
