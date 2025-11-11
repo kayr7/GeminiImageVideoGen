@@ -9,6 +9,7 @@ from models import (
     BulkCreateUsersRequest,
     UpdateUserRequest,
     UpdateQuotasRequest,
+    UpdateUserTagsRequest,
     UserResponse,
     QuotaResponse,
     SuccessResponse,
@@ -62,6 +63,7 @@ async def bulk_create_users(
                     "isNew": False,
                     "invitedBy": admin.username,
                     "sharedWith": other_admins,
+                    "tags": UserManager.get_user_tags(existing_user.id),
                 }
             )
         else:
@@ -88,12 +90,17 @@ async def bulk_create_users(
             else:
                 QuotaManager.set_default_quotas(new_user.id)
 
+            # Set default tags
+            if request.defaultTags:
+                UserManager.set_user_tags(new_user.id, request.defaultTags)
+
             created_users.append(
                 {
                     "id": new_user.id,
                     "email": new_user.email,
                     "isNew": True,
                     "invitedBy": admin.username,
+                    "tags": UserManager.get_user_tags(new_user.id),
                 }
             )
 
@@ -138,6 +145,7 @@ async def list_users(admin: LoginUser = Depends(require_admin)) -> SuccessRespon
                 "lastLoginAt": user.last_login_at,
                 "isShared": is_shared,
                 "sharedWith": other_admins if is_shared else None,
+                "tags": UserManager.get_user_tags(user.id),
             }
         )
 
@@ -197,6 +205,7 @@ async def get_user(
                 "lastLoginAt": user.last_login_at,
                 "isShared": is_shared,
                 "sharedWith": other_admins if is_shared else None,
+                "tags": UserManager.get_user_tags(user_id),
             },
             "quotas": quota_list,
         },
@@ -330,6 +339,66 @@ async def get_user_generations(
             "generations": generations,
         },
     )
+
+
+@router.put("/{user_id}/tags", response_model=SuccessResponse)
+async def update_user_tags(
+    user_id: str,
+    request: UpdateUserTagsRequest,
+    admin: LoginUser = Depends(require_admin),
+) -> SuccessResponse:
+    """
+    Update tags for a user (only if admin manages them).
+    This replaces all existing tags with the provided list.
+    """
+    admin_user = UserManager.get_user_by_email(admin.username)
+    if not admin_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Admin user not found"
+        )
+
+    # Check if admin can manage this user
+    if not UserManager.can_admin_manage_user(admin_user.id, user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to update this user's tags",
+        )
+
+    # Check if user exists
+    user = UserManager.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    # Update tags
+    UserManager.set_user_tags(user_id, request.tags)
+
+    return SuccessResponse(
+        success=True,
+        data={
+            "userId": user_id,
+            "tags": UserManager.get_user_tags(user_id),
+            "updated": True,
+        },
+    )
+
+
+@router.get("/tags/all", response_model=SuccessResponse)
+async def get_all_tags(admin: LoginUser = Depends(require_admin)) -> SuccessResponse:
+    """
+    Get all unique tags across all users.
+    Useful for autocomplete/suggestions.
+    """
+    admin_user = UserManager.get_user_by_email(admin.username)
+    if not admin_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Admin user not found"
+        )
+
+    all_tags = UserManager.get_all_tags()
+
+    return SuccessResponse(success=True, data={"tags": all_tags})
 
 
 __all__ = ["router"]

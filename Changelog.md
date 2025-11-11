@@ -18,9 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Pydantic models updated: `BulkCreateUsersRequest`, `UserResponse`, `UpdateUserTagsRequest`
   - Files: `backend/utils/database.py`, `backend/utils/user_manager.py`, `backend/models.py`
 
+### Backend Changes
+- **API Endpoints Updated** 🔌
+  - `POST /api/admin/users/bulk-create` - Added `defaultTags` support
+  - `GET /api/admin/users` - Now returns tags for each user
+  - `GET /api/admin/users/{user_id}` - Now returns tags
+  - `PUT /api/admin/users/{user_id}/tags` - NEW: Update user tags
+  - `GET /api/admin/users/tags/all` - NEW: Get all unique tags
+  - Files: `backend/routers/users.py`
+
 ### Status
-- ✅ Backend database and models complete
-- ⏳ API endpoints (in progress)
+- ✅ Backend database complete
+- ✅ Backend models complete  
+- ✅ Backend API endpoints complete
 - ⏳ Frontend UI (pending)
 
 ---
