@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, ChangeEvent } from 'react';
+import { useState, useRef, ChangeEvent, useEffect } from 'react';
 
 interface MultiFileUploadProps {
   label?: string;
@@ -9,6 +9,7 @@ interface MultiFileUploadProps {
   maxFiles?: number;
   preview?: boolean;
   helperText?: string;
+  disabled?: boolean;
 }
 
 export default function MultiFileUpload({
@@ -18,10 +19,27 @@ export default function MultiFileUpload({
   maxFiles = 5,
   preview = false,
   helperText,
+  disabled = false,
 }: MultiFileUploadProps) {
   const [previews, setPreviews] = useState<string[]>([]);
   const [fileNames, setFileNames] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const onFilesSelectRef = useRef(onFilesSelect);
+
+  useEffect(() => {
+    onFilesSelectRef.current = onFilesSelect;
+  }, [onFilesSelect]);
+
+  useEffect(() => {
+    if (disabled) {
+      setPreviews([]);
+      setFileNames([]);
+      if (inputRef.current) {
+        inputRef.current.value = '';
+      }
+      onFilesSelectRef.current([], []);
+    }
+  }, [disabled]);
 
   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -99,10 +117,11 @@ export default function MultiFileUpload({
           accept={accept}
           multiple
           onChange={handleFileChange}
+          disabled={disabled}
           className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-gray-700 dark:file:text-gray-300"
         />
-        
-        {fileNames.length > 0 && (
+
+        {fileNames.length > 0 && !disabled && (
           <button
             type="button"
             onClick={handleClearAll}
@@ -119,7 +138,7 @@ export default function MultiFileUpload({
         </p>
       )}
 
-      {fileNames.length > 0 && (
+      {fileNames.length > 0 && !disabled && (
         <div className="mt-2">
           <p className="text-sm text-gray-600 dark:text-gray-400">
             {fileNames.length} file{fileNames.length > 1 ? 's' : ''} selected
@@ -127,7 +146,7 @@ export default function MultiFileUpload({
         </div>
       )}
 
-      {preview && previews.length > 0 && (
+      {preview && previews.length > 0 && !disabled && (
         <div className="mt-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
           {previews.map((previewUrl, index) => (
             <div key={index} className="relative group">
