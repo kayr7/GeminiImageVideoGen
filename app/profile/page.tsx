@@ -35,7 +35,7 @@ interface Generation {
 
 export default function ProfilePage() {
   const router = useRouter();
-  const { user, token, initialising } = useAuth();
+  const { token, initialising } = useAuth();
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [generations, setGenerations] = useState<Generation[]>([]);

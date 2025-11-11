@@ -92,7 +92,7 @@ const getAuthToken = (): string | null => {
 
     const parsed = JSON.parse(raw);
     return parsed?.token || null;
-  } catch (error) {
+  } catch {
     return null;
   }
 };

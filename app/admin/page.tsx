@@ -274,7 +274,7 @@ export default function AdminPage() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">User Management</h1>
           <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
-            Manage users you've invited to the platform
+            Manage users you&apos;ve invited to the platform
           </p>
         </div>
         <Button onClick={() => setShowBulkCreate(true)}>
@@ -374,7 +374,7 @@ export default function AdminPage() {
           <div className="space-y-2 max-h-[600px] overflow-y-auto">
             {users.length === 0 ? (
               <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
-                No users yet. Click "+ Add Users" to invite people.
+                No users yet. Click &quot;+ Add Users&quot; to invite people.
               </p>
             ) : (
               users.map((usr) => (
