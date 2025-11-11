@@ -239,9 +239,8 @@ export default function Home() {
               Privacy & Safety
             </h4>
             <p className="text-gray-700 dark:text-gray-300 text-sm">
-              All content is processed through Google&apos;s Gemini API with built-in
-              safety filters. Uploaded images are temporary and automatically
-              deleted after processing.
+              All content is processed through Google&apos;s Gemini API with their built-in
+              safety filters. Uploaded and generated images or videos are saved and logged with IP to prevent abuse.
             </p>
           </div>
         </div>

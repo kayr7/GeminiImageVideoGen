@@ -66,6 +66,32 @@ const extractStringArray = (value: unknown): string[] => {
 
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 
+const PROMPT_TRUNCATE_LENGTH = 100;
+
+const TruncatedPrompt = ({ prompt }: { prompt: string }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const shouldTruncate = prompt.length > PROMPT_TRUNCATE_LENGTH;
+  
+  if (!shouldTruncate) {
+    return <h2 className="text-lg font-semibold text-gray-900 dark:text-white break-words">{prompt}</h2>;
+  }
+  
+  return (
+    <div>
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-white break-words">
+        {isExpanded ? prompt : `${prompt.slice(0, PROMPT_TRUNCATE_LENGTH)}...`}
+      </h2>
+      <button
+        type="button"
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium mt-1"
+      >
+        {isExpanded ? '▲ Show less' : '▼ Show more'}
+      </button>
+    </div>
+  );
+};
+
 export default function MediaGallery() {
   const { token, user } = useAuth();
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
@@ -229,7 +255,7 @@ export default function MediaGallery() {
 
                 <div className="flex-1 p-5 space-y-4">
                   <div>
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white break-words">{item.prompt}</h2>
+                    <TruncatedPrompt prompt={item.prompt} />
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Generated {formatDate(item.createdAt)}</p>
                   </div>
 
@@ -243,9 +269,17 @@ export default function MediaGallery() {
                       </p>
                     )}
                     {isNonEmptyString(item.details?.negativePrompt) && (
-                      <p>
-                        <span className="font-medium">Negative prompt:</span> {item.details?.negativePrompt}
-                      </p>
+                      <div className="text-sm">
+                        <span className="font-medium">Negative prompt:</span>{' '}
+                        {item.details.negativePrompt.length > 80 ? (
+                          <>
+                            {item.details.negativePrompt.slice(0, 80)}...
+                            <span className="text-xs text-gray-500 dark:text-gray-400"> (truncated)</span>
+                          </>
+                        ) : (
+                          item.details.negativePrompt
+                        )}
+                      </div>
                     )}
                   </div>
 

@@ -98,9 +98,6 @@ function LoginPageContent() {
       </form>
 
       <div className="mt-6 text-sm text-gray-600 dark:text-gray-300">
-        <p>
-          Default credentials are <code>admin</code> / <code>admin123</code> unless overridden using environment variables.
-        </p>
         <p className="mt-3">
           Lost access? Check the{' '}
           <Link href="/" className="text-blue-600 hover:underline">

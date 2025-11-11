@@ -48,23 +48,30 @@ class MediaStorage:
             "fileSize": row["file_size"],
             "mimeType": row["mime_type"],
             "details": details,
+            "ipAddress": row.get("ip_address"),  # May be None for old entries
         }
-    
+
     def save_media(self, media_type: str, base64_data: str, metadata: dict) -> str:
         """Save media to disk and return the media ID"""
         # Generate unique ID and filename
         media_id = str(uuid.uuid4())
-        extension = self._get_extension(metadata.get("mimeType", "video/mp4" if media_type == "video" else "image/png"))
+        extension = self._get_extension(
+            metadata.get(
+                "mimeType", "video/mp4" if media_type == "video" else "image/png"
+            )
+        )
         filename = f"{media_id}.{extension}"
-        
+
         # Determine file path
-        file_path = VIDEOS_DIR / filename if media_type == "video" else IMAGES_DIR / filename
-        
+        file_path = (
+            VIDEOS_DIR / filename if media_type == "video" else IMAGES_DIR / filename
+        )
+
         # Convert base64 to bytes and save
         file_bytes = base64.b64decode(base64_data)
         file_path.write_bytes(file_bytes)
-        
-        # Save metadata
+
+        # Save metadata with IP address for abuse tracking
         media_metadata = {
             "id": media_id,
             "type": media_type,
@@ -74,17 +81,20 @@ class MediaStorage:
             "userId": metadata.get("userId", "anonymous"),
             "createdAt": datetime.now(),
             "fileSize": len(file_bytes),
-            "mimeType": metadata.get("mimeType", "video/mp4" if media_type == "video" else "image/png"),
+            "mimeType": metadata.get(
+                "mimeType", "video/mp4" if media_type == "video" else "image/png"
+            ),
             "details": metadata.get("details"),
+            "ipAddress": metadata.get("ipAddress"),  # Track IP for abuse prevention
         }
-        
+
         with get_connection() as conn:
             conn.execute(
                 """
                 INSERT INTO media (
                     id, type, filename, prompt, model, user_id,
-                    created_at, file_size, mime_type, details
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, file_size, mime_type, details, ip_address
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     media_metadata["id"],
@@ -96,12 +106,19 @@ class MediaStorage:
                     media_metadata["createdAt"].isoformat(),
                     media_metadata["fileSize"],
                     media_metadata["mimeType"],
-                    json.dumps(media_metadata["details"]) if media_metadata.get("details") else None,
+                    (
+                        json.dumps(media_metadata["details"])
+                        if media_metadata.get("details")
+                        else None
+                    ),
+                    media_metadata["ipAddress"],
                 ),
             )
             conn.commit()
 
-        print(f"Saved {media_type} to disk: {filename} ({len(file_bytes) / 1024 / 1024:.2f} MB)")
+        print(
+            f"Saved {media_type} to disk: {filename} ({len(file_bytes) / 1024 / 1024:.2f} MB)"
+        )
 
         return media_id
 
@@ -119,7 +136,11 @@ class MediaStorage:
         media_meta = self._row_to_metadata(row)
 
         # Determine file path
-        file_path = VIDEOS_DIR / media_meta["filename"] if media_meta["type"] == "video" else IMAGES_DIR / media_meta["filename"]
+        file_path = (
+            VIDEOS_DIR / media_meta["filename"]
+            if media_meta["type"] == "video"
+            else IMAGES_DIR / media_meta["filename"]
+        )
 
         if not file_path.exists():
             print(f"Media file not found: {file_path}")
@@ -127,12 +148,9 @@ class MediaStorage:
 
         # Read file
         file_bytes = file_path.read_bytes()
-        
-        return {
-            "data": file_bytes,
-            "metadata": media_meta
-        }
-    
+
+        return {"data": file_bytes, "metadata": media_meta}
+
     def list_user_media(self, user_id: str, media_type: str = None) -> list:
         """List all media for a user"""
         query = "SELECT * FROM media WHERE user_id = ?"
@@ -162,7 +180,11 @@ class MediaStorage:
 
         media_meta = self._row_to_metadata(row)
 
-        file_path = VIDEOS_DIR / media_meta["filename"] if media_meta["type"] == "video" else IMAGES_DIR / media_meta["filename"]
+        file_path = (
+            VIDEOS_DIR / media_meta["filename"]
+            if media_meta["type"] == "video"
+            else IMAGES_DIR / media_meta["filename"]
+        )
 
         try:
             if file_path.exists():
@@ -197,7 +219,7 @@ class MediaStorage:
             "oldestFile": totals["oldest"],
             "newestFile": totals["newest"],
         }
-    
+
     def _get_extension(self, mime_type: str) -> str:
         """Get file extension from MIME type"""
         extensions = {
@@ -207,12 +229,16 @@ class MediaStorage:
             "image/jpeg": "jpg",
             "image/jpg": "jpg",
             "image/webp": "webp",
-            "image/gif": "gif"
+            "image/gif": "gif",
         }
-        return extensions.get(mime_type, "mp4" if mime_type.startswith("video/") else "png")
+        return extensions.get(
+            mime_type, "mp4" if mime_type.startswith("video/") else "png"
+        )
+
 
 # Singleton instance
 _storage_instance = None
+
 
 def get_media_storage() -> MediaStorage:
     """Get the singleton media storage instance"""
@@ -220,4 +246,3 @@ def get_media_storage() -> MediaStorage:
     if _storage_instance is None:
         _storage_instance = MediaStorage()
     return _storage_instance
-

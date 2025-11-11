@@ -1,6 +1,6 @@
 export const CONSTANTS = {
   // Prompt constraints
-  MAX_PROMPT_LENGTH: 2000,
+  MAX_PROMPT_LENGTH: 10000,
   MIN_PROMPT_LENGTH: 3,
   
   // File upload constraints

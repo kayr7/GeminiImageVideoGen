@@ -1,4 +1,5 @@
 """SQLite database utilities for backend storage."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -56,6 +57,17 @@ MIGRATIONS: list[tuple[int, Iterable[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_video_jobs_operationid ON video_jobs(operation_id)",
         ),
     ),
+    (
+        2,
+        (
+            # Add IP address tracking for abuse prevention
+            "ALTER TABLE media ADD COLUMN ip_address TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_media_ip_address ON media(ip_address, created_at DESC)",
+            # Add IP address tracking for video jobs as well
+            "ALTER TABLE video_jobs ADD COLUMN ip_address TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_video_jobs_ip_address ON video_jobs(ip_address, created_at DESC)",
+        ),
+    ),
 ]
 
 _db_initialized = False
@@ -85,7 +97,9 @@ def initialize_database() -> None:
 
             applied_versions = {
                 row[0]
-                for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
+                for row in conn.execute(
+                    "SELECT version FROM schema_migrations"
+                ).fetchall()
             }
 
             for version, statements in MIGRATIONS:

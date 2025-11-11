@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.7] - 2025-11-11
+
+### Changed
+- **Increased Prompt Length Limit** 📝
+  - Maximum prompt length increased from 2,000 to **10,000 characters**
+  - Applies to all generation types: image, video, and image editing
+  - Allows for much more detailed and complex prompts
+  - Updated in both frontend validation and backend API models
+  - Minimum length remains 1-3 characters
+
+---
+
+## [2.0.6] - 2025-11-11
+
+### Added
+- **IP Address Tracking for Abuse Prevention** 🔒
+  - All generations now save client IP address and timestamp
+  - Database migration adds `ip_address` column to `media` and `video_jobs` tables
+  - IP extraction handles proxy headers (X-Forwarded-For, X-Real-IP)
+  - Admins can view IP addresses in gallery for abuse investigation
+  - Helps identify and block malicious users
+  - **Privacy**: IP addresses only visible to admins, used solely for abuse prevention
+
+### Changed
+- **Enhanced Media Metadata** 📊
+  - Every image/video generation now includes:
+    - Client IP address (`ipAddress` field)
+    - Precise timestamp (`createdAt` field, already existed)
+    - User ID or "anonymous"
+  - Indexed for quick lookups by IP address
+  - Enables tracking patterns of abuse or overuse
+
+---
+
+## [2.0.5] - 2025-11-11
+
+### Fixed
+- **Reference Images Not Saved** 🖼️
+  - Reference images from image generation now properly saved in media metadata
+  - Source images from image editing now saved in media metadata
+  - Gallery now displays all reference images used during generation
+  - Added `details` field to metadata containing:
+    - `referenceImages`: Images used for style/composition guidance
+    - `sourceImages`: Images used for editing
+    - `negativePrompt`: Negative prompts (for Imagen models)
+    - `mode`: Generation mode ("edit" vs normal generation)
+
+### Changed
+- **Gallery UI Improvements** ✨
+  - Prompts now truncated to 100 characters with expandable "Show more" button
+  - Long prompts no longer take up excessive space in gallery cards
+  - Click "▼ Show more" to expand, "▲ Show less" to collapse
+  - Negative prompts also truncated to 80 characters for consistency
+  - Much cleaner and more compact gallery view
+
+---
+
 ## [2.0.4] - 2025-11-11
 
 ### Fixed
