@@ -1,46 +1,96 @@
-"""Simple in-memory session manager for issued auth tokens."""
+"""Database-backed session manager for issued auth tokens."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Dict, Optional
+from typing import Optional
+import secrets
 
 from models import LoginUser
-
-import secrets
+from .database import get_connection
 
 
 class _SessionManager:
-    """Manage short-lived bearer tokens for authenticated users."""
+    """Manage short-lived bearer tokens for authenticated users in database."""
 
-    def __init__(self) -> None:
-        self._sessions: Dict[str, Dict[str, object]] = {}
-
-    def create_session(self, user: LoginUser, *, ttl_hours: int = 24) -> str:
+    def create_session(
+        self, user: LoginUser, user_id: str, *, ttl_hours: int = 24
+    ) -> str:
+        """Create a new session and store in database."""
         token = secrets.token_urlsafe(32)
-        self._sessions[token] = {
-            "user": user,
-            "expires": datetime.utcnow() + timedelta(hours=ttl_hours),
-        }
+        now = datetime.utcnow()
+        expires = now + timedelta(hours=ttl_hours)
+
+        with get_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO user_sessions (token, user_id, created_at, expires_at, last_activity_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (token, user_id, now.isoformat(), expires.isoformat(), now.isoformat()),
+            )
+            conn.commit()
+
         return token
 
     def get_user(self, token: str) -> Optional[LoginUser]:
-        session = self._sessions.get(token)
-        if not session:
-            return None
+        """Get user from session token."""
+        with get_connection() as conn:
+            # Get session
+            row = conn.execute(
+                """
+                SELECT s.user_id, s.expires_at, u.email, u.is_admin, u.is_active
+                FROM user_sessions s
+                JOIN users u ON s.user_id = u.id
+                WHERE s.token = ?
+                """,
+                (token,),
+            ).fetchone()
 
-        expires_at = session.get("expires")
-        if isinstance(expires_at, datetime) and expires_at < datetime.utcnow():
-            # Session expired - remove and treat as invalid
-            self._sessions.pop(token, None)
-            return None
+            if not row:
+                return None
 
-        user = session.get("user")
-        if isinstance(user, LoginUser):
-            return user
-        return None
+            # Check if expired
+            expires_at = datetime.fromisoformat(row["expires_at"])
+            if expires_at < datetime.utcnow():
+                # Clean up expired session
+                conn.execute("DELETE FROM user_sessions WHERE token = ?", (token,))
+                conn.commit()
+                return None
+
+            # Check if user is active
+            if not bool(row["is_active"]):
+                return None
+
+            # Update last activity
+            conn.execute(
+                "UPDATE user_sessions SET last_activity_at = ? WHERE token = ?",
+                (datetime.utcnow().isoformat(), token),
+            )
+            conn.commit()
+
+            # Return LoginUser
+            roles = ["admin"] if bool(row["is_admin"]) else []
+            return LoginUser(
+                username=row["email"],
+                displayName=row["email"],
+                roles=roles,
+            )
 
     def invalidate(self, token: str) -> None:
-        self._sessions.pop(token, None)
+        """Invalidate a session."""
+        with get_connection() as conn:
+            conn.execute("DELETE FROM user_sessions WHERE token = ?", (token,))
+            conn.commit()
+
+    def cleanup_expired_sessions(self) -> None:
+        """Remove expired sessions from database."""
+        with get_connection() as conn:
+            conn.execute(
+                "DELETE FROM user_sessions WHERE expires_at < ?",
+                (datetime.utcnow().isoformat(),),
+            )
+            conn.commit()
 
 
 session_manager = _SessionManager()

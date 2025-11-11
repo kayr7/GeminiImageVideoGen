@@ -68,6 +68,73 @@ MIGRATIONS: list[tuple[int, Iterable[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_video_jobs_ip_address ON video_jobs(ip_address, created_at DESC)",
         ),
     ),
+    (
+        3,
+        (
+            # User management system
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                password_hash TEXT,
+                is_active INTEGER DEFAULT 1,
+                is_admin INTEGER DEFAULT 0,
+                require_password_reset INTEGER DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_login_at TEXT
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)",
+            "CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active)",
+            "CREATE INDEX IF NOT EXISTS idx_users_admin ON users(is_admin)",
+            # Many-to-many relationship between users and admins
+            """
+            CREATE TABLE IF NOT EXISTS user_admins (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                admin_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE(user_id, admin_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_user_admins_user ON user_admins(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_user_admins_admin ON user_admins(admin_id)",
+            # User quotas
+            """
+            CREATE TABLE IF NOT EXISTS user_quotas (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                generation_type TEXT NOT NULL CHECK (generation_type IN ('image', 'video', 'edit')),
+                quota_type TEXT NOT NULL CHECK (quota_type IN ('daily', 'weekly', 'unlimited')),
+                quota_limit INTEGER,
+                quota_used INTEGER DEFAULT 0,
+                quota_reset_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_user_quotas_user_id ON user_quotas(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_user_quotas_type ON user_quotas(user_id, generation_type)",
+            "CREATE INDEX IF NOT EXISTS idx_user_quotas_reset ON user_quotas(quota_reset_at)",
+            # User sessions (database-backed)
+            """
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                token TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                last_activity_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at)",
+        ),
+    ),
 ]
 
 _db_initialized = False

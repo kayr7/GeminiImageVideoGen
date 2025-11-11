@@ -156,6 +156,7 @@ class LoginResponseData(BaseModel):
     token: str
     user: LoginUser
     config: LoginConfig
+    requirePasswordSetup: Optional[bool] = False
 
 
 class LoginResponse(BaseModel):
@@ -166,3 +167,49 @@ class LoginResponse(BaseModel):
 class LoginRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=128)
     password: str = Field(..., min_length=1, max_length=128)
+
+
+# User Management Models
+class SetPasswordRequest(BaseModel):
+    email: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=8, max_length=128)
+
+
+class ChangePasswordRequest(BaseModel):
+    currentPassword: str = Field(..., min_length=1)
+    newPassword: str = Field(..., min_length=8, max_length=128)
+
+
+class BulkCreateUsersRequest(BaseModel):
+    emails: List[str] = Field(..., min_items=1)
+    defaultQuotas: Optional[Dict[str, Dict[str, Any]]] = None
+
+
+class UpdateUserRequest(BaseModel):
+    isActive: Optional[bool] = None
+
+
+class UpdateQuotasRequest(BaseModel):
+    quotas: Dict[str, Dict[str, Any]]  # e.g., {"image": {"type": "daily", "limit": 50}}
+
+
+class UserResponse(BaseModel):
+    id: str
+    email: str
+    isActive: bool
+    isAdmin: bool
+    requirePasswordReset: bool
+    createdAt: str
+    updatedAt: str
+    lastLoginAt: Optional[str] = None
+    isShared: Optional[bool] = None
+    sharedWith: Optional[List[str]] = None
+
+
+class QuotaResponse(BaseModel):
+    generationType: str
+    quotaType: str
+    quotaLimit: Optional[int]
+    quotaUsed: int
+    quotaRemaining: Optional[int]
+    quotaResetAt: Optional[str]
