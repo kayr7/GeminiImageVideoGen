@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Clearer and simpler for users to understand
   - Files: `backend/utils/quota_manager.py`, `backend/utils/database.py` (migration #5), `backend/routers/image.py`, `app/admin/page.tsx`
 
+### Fixed
+- **Gallery Authentication** 🔒
+  - Fixed 401 errors when viewing media in gallery
+  - Gallery now fetches media with authentication and creates blob URLs
+  - Blob URLs automatically revoked on component unmount to prevent memory leaks
+  - File: `components/gallery/MediaGallery.tsx`
+
 ### Migration Notes
 - Migration #5 automatically removes old "edit" quotas
 - Image and video quotas are preserved

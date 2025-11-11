@@ -101,8 +101,33 @@ export default function MediaGallery() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [blobUrls, setBlobUrls] = useState<Record<string, string>>({});
 
   const isAdmin = useMemo(() => user?.roles?.includes('admin') ?? false, [user?.roles]);
+
+  // Create blob URLs for media with authentication
+  const createBlobUrl = useCallback(async (mediaId: string): Promise<string | null> => {
+    try {
+      const response = await apiFetch(`/api/media/${mediaId}`);
+      if (!response.ok) {
+        console.error(`Failed to fetch media ${mediaId}:`, response.status);
+        return null;
+      }
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      return blobUrl;
+    } catch (err) {
+      console.error(`Error creating blob URL for ${mediaId}:`, err);
+      return null;
+    }
+  }, []);
+
+  // Clean up blob URLs on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(blobUrls).forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [blobUrls]);
 
   const loadMedia = useCallback(async () => {
     setLoading(true);
@@ -159,12 +184,24 @@ export default function MediaGallery() {
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
       setMediaItems(parsed);
+
+      // Create blob URLs for all media items (for authenticated access)
+      const newBlobUrls: Record<string, string> = {};
+      await Promise.all(
+        parsed.map(async (item) => {
+          const blobUrl = await createBlobUrl(item.id);
+          if (blobUrl) {
+            newBlobUrls[item.id] = blobUrl;
+          }
+        })
+      );
+      setBlobUrls(newBlobUrls);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load gallery');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [createBlobUrl]);
 
   useEffect(() => {
     void loadMedia();
@@ -250,13 +287,18 @@ export default function MediaGallery() {
               >
                 <div className="relative bg-gray-50 dark:bg-gray-800">
                   {item.type === 'image' ? (
-                    <img src={item.url} alt={item.prompt} className="w-full object-contain max-h-72 bg-black" loading="lazy" />
+                    <img 
+                      src={blobUrls[item.id] || item.url} 
+                      alt={item.prompt} 
+                      className="w-full object-contain max-h-72 bg-black" 
+                      loading="lazy" 
+                    />
                   ) : (
                     <video
                       controls
                       preload="metadata"
                       className="w-full max-h-72 bg-black"
-                      src={item.url}
+                      src={blobUrls[item.id] || item.url}
                     />
                   )}
                   <span className="absolute top-3 left-3 inline-flex items-center rounded-full bg-blue-600/90 text-white text-xs font-semibold px-3 py-1 uppercase tracking-wide">
