@@ -1,4 +1,6 @@
-const normaliseBasePath = (value = '') => {
+const DEFAULT_BASE_PATH = '/HdMImageVideo';
+
+const normaliseBasePath = (value = DEFAULT_BASE_PATH) => {
   const trimmed = value.trim();
   if (!trimmed || trimmed === '/') {
     return '';
@@ -8,7 +10,7 @@ const normaliseBasePath = (value = '') => {
   return withLeadingSlash.replace(/\/+$/, '');
 };
 
-const basePath = normaliseBasePath(process.env.NEXT_PUBLIC_BASE_PATH);
+const basePath = normaliseBasePath(process.env.NEXT_PUBLIC_BASE_PATH ?? DEFAULT_BASE_PATH);
 const hasBasePath = basePath.length > 0;
 
 /** @type {import('next').NextConfig} */
