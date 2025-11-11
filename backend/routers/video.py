@@ -198,6 +198,7 @@ async def generate_video(
                 "status": "processing",
                 "progress": 0,
                 "jobId": operation.name,
+                "ipAddress": client_ip,  # Track IP for abuse prevention
                 "details": {
                     "mode": "text",
                     "negativePrompt": req.negativePrompt,
@@ -306,6 +307,7 @@ async def animate_image(
                 "status": "processing",
                 "progress": 0,
                 "jobId": operation.name,
+                "ipAddress": client_ip,  # Track IP for abuse prevention
                 "details": {
                     "mode": "animate",
                     "negativePrompt": req.negativePrompt,
@@ -480,11 +482,15 @@ async def check_video_status(
                     if value is not None:
                         details[key] = value
 
+        # Get IP address from job data
+        ip_address = job_data.get("ipAddress")
+
         metadata_payload = {
             "prompt": prompt_for_metadata,
             "model": model_for_metadata,
             "userId": user_id,
             "mimeType": "video/mp4",
+            "ipAddress": ip_address,  # Track IP for abuse prevention
         }
         if details:
             metadata_payload["details"] = details

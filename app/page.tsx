@@ -204,9 +204,9 @@ export default function Home() {
               Usage Limits
             </h4>
             <p className="text-gray-700 dark:text-gray-300 text-sm">
-              To control costs, this platform implements rate limiting. You can
-              view your current usage at the top of the page. Limits reset hourly
-              and daily.
+              To control costs, this platform implements usage quotas. You can
+              view your current usage and remaining quota at the top of the page.
+              Quotas are set by your administrator.
             </p>
           </div>
 

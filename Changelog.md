@@ -24,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Blob URLs automatically revoked on component unmount to prevent memory leaks
   - File: `components/gallery/MediaGallery.tsx`
 
+- **Quota Reset Display Removed** 🎯
+  - Removed all references to quota reset times in UI
+  - Quotas are now clearly presented as absolute total usage limits
+  - Updated home page and profile page to reflect absolute quota model
+  - Files: `app/page.tsx`, `app/profile/page.tsx`
+
+- **Video IP Tracking** 🔍
+  - Fixed missing IP address recording for video generations
+  - IP is now saved to video job and included in media metadata
+  - Both generate and animate endpoints now track IP addresses
+  - File: `backend/routers/video.py`
+
 ### Migration Notes
 - Migration #5 automatically removes old "edit" quotas
 - Image and video quotas are preserved

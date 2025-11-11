@@ -158,28 +158,6 @@ export default function ProfilePage() {
     }
   };
 
-  const formatResetTime = (resetAt: string | null) => {
-    if (!resetAt) return null;
-
-    try {
-      const resetDate = new Date(resetAt);
-      const now = new Date();
-      const diffMs = resetDate.getTime() - now.getTime();
-      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-
-      if (diffHours < 0) return 'Resetting soon...';
-      if (diffHours < 1) {
-        const diffMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-        return `${diffMinutes} minutes`;
-      }
-      if (diffHours < 24) return `${diffHours} hours`;
-
-      const diffDays = Math.floor(diffHours / 24);
-      return `${diffDays} days`;
-    } catch {
-      return null;
-    }
-  };
 
   if (initialising || loading) {
     return (
@@ -382,11 +360,6 @@ export default function ProfilePage() {
                         style={{ width: `${Math.min(usedPercentage, 100)}%` }}
                       />
                     </div>
-                    {quota.quotaResetAt && (
-                      <p className="text-xs mt-2 opacity-75">
-                        Resets in {formatResetTime(quota.quotaResetAt)}
-                      </p>
-                    )}
                   </>
                 )}
               </div>
