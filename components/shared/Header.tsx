@@ -135,7 +135,6 @@ export default function Header() {
               onClick={toggleMobileMenu}
               className="md:hidden p-2 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
               aria-label="Toggle menu"
-              aria-expanded={mobileMenuOpen}
               aria-controls="mobile-menu"
             >
               <svg
@@ -175,7 +174,6 @@ export default function Header() {
             ))}
           </nav>
           <div className="mt-4 space-y-3 px-4 text-sm text-gray-600 dark:text-gray-300">
-            <UsageDisplay />
             {!initialising && token && (
               <div>
                 <div className="flex items-center justify-between mb-3">
