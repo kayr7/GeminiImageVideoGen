@@ -1,7 +1,7 @@
 """Pydantic models for request/response validation."""
 
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -78,6 +78,7 @@ class MediaMetadata(BaseModel):
     createdAt: datetime
     fileSize: int
     mimeType: str
+    details: Optional[Dict[str, Any]] = None
 
 # Generic Response Models
 class SuccessResponse(BaseModel):

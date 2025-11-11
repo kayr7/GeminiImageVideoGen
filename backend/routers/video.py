@@ -9,7 +9,7 @@ import os
 import time
 import base64
 from datetime import datetime
-from typing import Optional
+from typing import Dict, Optional
 
 from models import VideoGenerationRequest, VideoAnimateRequest, VideoResponse, SuccessResponse
 from utils.config import resolve_model_choice
@@ -143,7 +143,14 @@ async def generate_video(request: VideoGenerationRequest):
             "mode": "text",
             "status": "processing",
             "progress": 0,
-            "jobId": operation.name
+            "jobId": operation.name,
+            "details": {
+                "mode": "text",
+                "negativePrompt": request.negativePrompt,
+                "firstFrame": request.firstFrame,
+                "lastFrame": request.lastFrame,
+                "referenceImages": request.referenceImages,
+            }
         })
         
         print(f"Video generation started. Operation: {operation.name}")
@@ -224,7 +231,12 @@ async def animate_image(request: VideoAnimateRequest):
             "mode": "animate",
             "status": "processing",
             "progress": 0,
-            "jobId": operation.name
+            "jobId": operation.name,
+            "details": {
+                "mode": "animate",
+                "negativePrompt": request.negativePrompt,
+                "sourceImages": request.sourceImages,
+            }
         })
         
         print(f"Video animation started. Operation: {operation.name}")
@@ -350,21 +362,42 @@ async def check_video_status(jobId: str = Query(..., description="Operation ID f
         # Convert to base64
         video_base64 = base64.b64encode(video_bytes).decode('utf-8')
         
-        # Save to storage
+        # Save to storage with metadata from the original request
         storage = get_media_storage()
+        job_data = queue.get_job(jobId)
+
+        prompt_for_metadata = (job_data or {}).get("prompt") or "Video generation"
+        model_for_metadata = (job_data or {}).get("model") or "veo"
+        user_id = (job_data or {}).get("userId") or "anonymous"
+
+        details: Dict[str, object] = {}
+        if job_data:
+            if job_data.get("mode"):
+                details["mode"] = job_data.get("mode")
+
+            job_details = job_data.get("details")
+            if isinstance(job_details, dict):
+                for key, value in job_details.items():
+                    if value is not None:
+                        details[key] = value
+
+        metadata_payload = {
+            "prompt": prompt_for_metadata,
+            "model": model_for_metadata,
+            "userId": user_id,
+            "mimeType": "video/mp4",
+        }
+        if details:
+            metadata_payload["details"] = details
+
         media_id = storage.save_media(
             media_type="video",
             base64_data=video_base64,
-            metadata={
-                "prompt": "Video generation",
-                "model": "veo",
-                "userId": "anonymous",
-                "mimeType": "video/mp4"
-            }
+            metadata=metadata_payload,
         )
-        
+
         print(f"Video saved with ID: {media_id}")
-        
+
         # Update job
         queue.update_job(jobId, {
             "status": "completed",

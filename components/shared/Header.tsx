@@ -24,6 +24,7 @@ export default function Header() {
       if (featureFlags?.videoGeneration ?? true) {
         items.push({ name: 'Video', href: '/video' });
       }
+      items.push({ name: 'Gallery', href: '/gallery' });
       if (isAdmin) {
         items.push({ name: 'Admin', href: '/admin' });
       }

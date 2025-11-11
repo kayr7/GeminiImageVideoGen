@@ -1,11 +1,10 @@
-"""
-Media storage endpoints for retrieving saved images and videos
-"""
-from fastapi import APIRouter, HTTPException, Response, Query
+"""Media storage endpoints for retrieving saved images and videos."""
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from typing import Optional
 
 from models import SuccessResponse
 from utils.media_storage import get_media_storage
+from utils.auth import require_admin
 
 router = APIRouter()
 
@@ -58,7 +57,31 @@ async def list_media(
                 "total": len(media_list)
             }
         )
-        
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{media_id}", response_model=SuccessResponse)
+async def delete_media(media_id: str, _: None = Depends(require_admin)):
+    """Delete a specific media item (admin only)."""
+    try:
+        storage = get_media_storage()
+        deleted = storage.delete_media(media_id)
+
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        return SuccessResponse(
+            success=True,
+            data={
+                "mediaId": media_id,
+                "deleted": True
+            }
+        )
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
