@@ -515,6 +515,7 @@ export default function AdminPage() {
                           {editingQuotas && (
                             <div className="flex gap-2">
                               <select
+                                aria-label={`Quota type for ${quota.generationType}`}
                                 className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
                                 value={quotaUpdates[quota.generationType]?.type || quota.quotaType}
                                 onChange={(e) =>
@@ -534,6 +535,7 @@ export default function AdminPage() {
                               {(quotaUpdates[quota.generationType]?.type || quota.quotaType) !== 'unlimited' && (
                         <input
                                   type="number"
+                                  aria-label={`Quota limit for ${quota.generationType}`}
                                   className="text-xs px-2 py-1 w-20 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
                                   value={quotaUpdates[quota.generationType]?.limit ?? quota.quotaLimit}
                                   onChange={(e) =>

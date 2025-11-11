@@ -105,13 +105,25 @@ async def generate_image(
         if is_nano_banana:
             # Nano Banana (Gemini 2.5 Flash Image) approach
             # Build contents with prompt and optional reference images
+
+            # Check reference image limit (Nano Banana typically supports 1-3 reference images)
+            if req.referenceImages and len(req.referenceImages) > 3:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Too many reference images. Nano Banana supports up to 3 reference images, you provided {len(req.referenceImages)}.",
+                )
+
             parts = [req.prompt]
 
             if req.referenceImages:
-                for img_data in req.referenceImages:
+                print(
+                    f"Processing {len(req.referenceImages)} reference images for Nano Banana"
+                )
+                for idx, img_data in enumerate(req.referenceImages):
                     # Extract base64 data
                     if "," in img_data:
                         img_data = img_data.split(",")[1]
+                    print(f"Reference image {idx + 1}: {len(img_data)} chars")
                     parts.append(
                         {"inline_data": {"mime_type": "image/png", "data": img_data}}
                     )
@@ -122,64 +134,122 @@ async def generate_image(
             if req.aspectRatio and req.aspectRatio != "1:1":
                 config["image_config"] = {"aspect_ratio": req.aspectRatio}
 
-            response = client.models.generate_content(
-                model=model_name, contents=parts, config=config
+            try:
+                print(
+                    f"Calling Nano Banana with {len(parts)} parts (1 prompt + {len(parts)-1} images)"
+                )
+                response = client.models.generate_content(
+                    model=model_name, contents=parts, config=config
+                )
+            except Exception as api_error:
+                print(f"Nano Banana API error: {str(api_error)}")
+                error_msg = str(api_error)
+
+                # Check for common issues
+                if "IMAGE_OTHER" in error_msg or "not a valid" in error_msg:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"The model encountered an issue processing the request. This may happen with certain reference images. Try with fewer or different reference images. Error: {error_msg}",
+                    )
+
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Gemini API error: {error_msg}",
+                )
+
+            # Debug logging
+            print(f"Nano Banana response received")
+            print(
+                f"Response has candidates: {response.candidates is not None if response else False}"
             )
 
             # Extract image data
-            if response.candidates and len(response.candidates) > 0:
-                for part in response.candidates[0].content.parts:
-                    if hasattr(part, "inline_data") and part.inline_data:
-                        # Get image data - it's always bytes from the API
-                        image_data = part.inline_data.data
+            if not response:
+                raise HTTPException(
+                    status_code=500,
+                    detail="No response from Gemini API",
+                )
 
-                        # Ensure we have bytes and convert to base64 string
-                        if isinstance(image_data, bytes):
-                            image_base64 = base64.b64encode(image_data).decode("utf-8")
-                        elif isinstance(image_data, str):
-                            # Already base64 string
-                            image_base64 = image_data
-                        else:
-                            # Unknown type, try to get string representation
-                            image_base64 = str(image_data)
+            if not response.candidates or len(response.candidates) == 0:
+                raise HTTPException(
+                    status_code=500,
+                    detail="No candidates in response from Gemini API. The model may have rejected the request.",
+                )
 
-                        print(
-                            f"Image data type: {type(image_data)}, Base64 length: {len(image_base64)}"
-                        )
+            # Check finish reason
+            candidate = response.candidates[0]
+            finish_reason = getattr(candidate, "finish_reason", None)
+            print(f"Finish reason: {finish_reason}")
 
-                        # Save to storage with reference images and IP
-                        storage = get_media_storage()
-                        details = {}
-                        if req.referenceImages:
-                            details["referenceImages"] = req.referenceImages
+            # Check for safety or other blocks
+            if finish_reason and finish_reason not in ["STOP", "MAX_TOKENS", None]:
+                print(f"Unusual finish reason: {finish_reason}")
+                # Continue anyway as IMAGE_OTHER might just be a warning
 
-                        media_id = storage.save_media(
-                            media_type="image",
-                            base64_data=image_base64,
-                            metadata={
-                                "prompt": req.prompt,
-                                "model": model_name,
-                                "userId": db_user.id,  # Real user ID
-                                "mimeType": "image/png",
-                                "details": details if details else None,
-                                "ipAddress": client_ip,  # Track IP for abuse prevention
-                            },
-                        )
+            if not candidate.content:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"No content in response. Finish reason: {finish_reason}. The model may have filtered the request.",
+                )
 
-                        # Increment quota after successful generation
-                        QuotaManager.increment_quota(db_user.id, "image")
+            if not candidate.content.parts:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"No content parts in response. Finish reason: {finish_reason}. The model may have encountered an error.",
+                )
 
-                        # Return response with all string values
-                        response_data = {
-                            "imageUrl": f"data:image/png;base64,{image_base64}",
-                            "imageData": str(image_base64),  # Ensure it's a string
-                            "prompt": str(req.prompt),
+            for part in response.candidates[0].content.parts:
+                if hasattr(part, "inline_data") and part.inline_data:
+                    # Get image data - it's always bytes from the API
+                    image_data = part.inline_data.data
+
+                    # Ensure we have bytes and convert to base64 string
+                    if isinstance(image_data, bytes):
+                        image_base64 = base64.b64encode(image_data).decode("utf-8")
+                    elif isinstance(image_data, str):
+                        # Already base64 string
+                        image_base64 = image_data
+                    else:
+                        # Unknown type, try to get string representation
+                        image_base64 = str(image_data)
+
+                    print(
+                        f"Image data type: {type(image_data)}, Base64 length: {len(image_base64)}"
+                    )
+
+                    # Save to storage with reference images and IP
+                    storage = get_media_storage()
+                    details = {}
+                    if req.referenceImages:
+                        details["referenceImages"] = req.referenceImages
+
+                    media_id = storage.save_media(
+                        media_type="image",
+                        base64_data=image_base64,
+                        metadata={
+                            "prompt": req.prompt,
                             "model": model_name,
-                            "generatedAt": datetime.now().isoformat(),
-                            "mediaId": str(media_id),
-                        }
+                            "userId": db_user.id,  # Real user ID
+                            "mimeType": "image/png",
+                            "details": details if details else None,
+                            "ipAddress": client_ip,  # Track IP for abuse prevention
+                        },
+                    )
 
-                        return SuccessResponse(success=True, data=response_data)
+                    # Increment quota after successful generation
+                    QuotaManager.increment_quota(db_user.id, "image")
+
+                    # Return response with all string values
+                    response_data = {
+                        "imageUrl": f"data:image/png;base64,{image_base64}",
+                        "imageData": str(image_base64),  # Ensure it's a string
+                        "prompt": str(req.prompt),
+                        "model": model_name,
+                        "generatedAt": datetime.now().isoformat(),
+                        "mediaId": str(media_id),
+                    }
+
+                    return SuccessResponse(success=True, data=response_data)
         else:
             # Imagen approach (using predict method)
             instance = {"prompt": req.prompt}
