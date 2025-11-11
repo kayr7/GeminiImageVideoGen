@@ -26,6 +26,8 @@ interface MediaItem {
   url: string;
   details?: MediaDetails | null;
   ipAddress?: string | null;
+  userEmail?: string | null;
+  userId?: string | null;
 }
 
 interface MediaListResponse {
@@ -148,6 +150,8 @@ export default function MediaGallery() {
             url: resolveMediaUrl(isNonEmptyString(item.url) ? item.url : `/api/media/${id}`),
             details,
             ipAddress: isNonEmptyString(item.ipAddress) ? item.ipAddress : null,
+            userEmail: isNonEmptyString(item.userEmail) ? item.userEmail : null,
+            userId: isNonEmptyString(item.userId) ? item.userId : null,
           });
 
           return acc;
@@ -332,13 +336,18 @@ export default function MediaGallery() {
                 {isAdmin && (
                   <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-5 py-3">
                     <div className="flex items-center justify-between gap-4">
-                      <div className="text-xs text-gray-600 dark:text-gray-400">
+                      <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
+                        {item.userEmail && (
+                          <div>
+                            <span className="font-medium">User:</span> {item.userEmail}
+                          </div>
+                        )}
                         {item.ipAddress ? (
-                          <span>
+                          <div>
                             <span className="font-medium">IP:</span> {item.ipAddress}
-                          </span>
+                          </div>
                         ) : (
-                          <span className="text-gray-400 dark:text-gray-500">No IP recorded</span>
+                          <div className="text-gray-400 dark:text-gray-500">No IP recorded</div>
                         )}
                       </div>
                       <button

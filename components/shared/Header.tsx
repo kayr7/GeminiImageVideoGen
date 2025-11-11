@@ -25,12 +25,15 @@ export default function Header() {
         items.push({ name: 'Video', href: '/video' });
       }
       items.push({ name: 'Gallery', href: '/gallery' });
+      if (token) {
+        items.push({ name: 'Profile', href: '/profile' });
+      }
       if (isAdmin) {
         items.push({ name: 'Admin', href: '/admin' });
       }
       return items;
     },
-    [featureFlags, isAdmin]
+    [featureFlags, isAdmin, token]
   );
 
   const displayName = user?.displayName || user?.username;
@@ -103,18 +106,22 @@ export default function Header() {
             </div>
 
             {!initialising && token && (
-              <div className="hidden md:flex items-center space-x-3 text-sm text-gray-600 dark:text-gray-300">
-                <span>Signed in as {displayName}</span>
+              <div className="hidden md:flex items-center space-x-3">
+                <div className="text-sm text-gray-600 dark:text-gray-300">
+                  <span className="font-medium">{displayName}</span>
+                  {isAdmin && (
+                    <span className="ml-2 px-2 py-0.5 text-xs font-semibold text-blue-700 bg-blue-100 dark:text-blue-300 dark:bg-blue-900 rounded">
+                      Admin
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={logout}
+                  className="px-4 py-2 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                >
+                  Logout
+                </button>
               </div>
-            )}
-
-            {!initialising && token && (
-              <button
-                onClick={logout}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors"
-              >
-                Sign out
-              </button>
             )}
 
             {!initialising && !token && (
@@ -175,15 +182,24 @@ export default function Header() {
             <UsageDisplay />
             {!initialising && token && (
               <div>
-                <p className="mb-2">Signed in as {displayName}</p>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white">{displayName}</p>
+                    {isAdmin && (
+                      <span className="inline-block mt-1 px-2 py-0.5 text-xs font-semibold text-blue-700 bg-blue-100 dark:text-blue-300 dark:bg-blue-900 rounded">
+                        Admin
+                      </span>
+                    )}
+                  </div>
+                </div>
                 <button
                   onClick={() => {
                     closeMobileMenu();
                     logout();
                   }}
-                  className="w-full px-4 py-2 rounded-lg font-medium text-white bg-blue-600 hover:bg-blue-700 transition-colors"
+                  className="w-full px-4 py-2 rounded-lg font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                 >
-                  Sign out
+                  Logout
                 </button>
               </div>
             )}

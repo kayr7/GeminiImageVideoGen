@@ -1,410 +1,604 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-
-import Button from '@/components/ui/Button';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/context/AuthContext';
 import { apiFetch } from '@/lib/utils/apiClient';
-import type {
-  AdminModelConfigResponse,
-  AdminCategorySettings,
-  ModelAvailability,
-  ModelInfo,
-  ModelQuotaConfig,
-} from '@/types';
+import Button from '@/components/ui/Button';
+import Input from '@/components/ui/Input';
+import Textarea from '@/components/ui/Textarea';
+import Select from '@/components/ui/Select';
 
-type CategoryState = {
-  enabled: Set<string>;
-  defaultModel: string | null;
-  quotas: Record<string, { daily: string; monthly: string }>;
-};
+interface User {
+  id: string;
+  email: string;
+  isActive: boolean;
+  isAdmin: boolean;
+  requirePasswordReset: boolean;
+  createdAt: string;
+  lastLoginAt: string | null;
+  isShared: boolean;
+  sharedWith: string[] | null;
+}
 
-type CategoryStateMap = Record<string, CategoryState>;
+interface Quota {
+  generationType: string;
+  quotaType: string;
+  quotaLimit: number | null;
+  quotaUsed: number;
+  quotaRemaining: number | null;
+  quotaResetAt: string | null;
+}
 
-type Registry = Record<string, ModelInfo[]>;
-
-type AvailabilityMap = Record<string, ModelAvailability>;
-
-function normaliseQuotaInput(value: string): string {
-  return value.replace(/[^0-9]/g, '');
+interface Generation {
+  id: string;
+  type: string;
+  prompt: string;
+  model: string;
+  createdAt: string;
+  userId: string;
+  userEmail: string;
+  ipAddress: string;
 }
 
 export default function AdminPage() {
-  const { token, user, initialising } = useAuth();
-  const [registry, setRegistry] = useState<Registry>({});
-  const [categoryState, setCategoryState] = useState<CategoryStateMap>({});
-  const [effectiveConfig, setEffectiveConfig] = useState<AvailabilityMap>({});
+  const router = useRouter();
+  const { user, initialising, token } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [users, setUsers] = useState<User[]>([]);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [selectedUserQuotas, setSelectedUserQuotas] = useState<Quota[]>([]);
+  const [selectedUserGenerations, setSelectedUserGenerations] = useState<Generation[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [savingCategory, setSavingCategory] = useState<string | null>(null);
 
-  const isAdmin = useMemo(() => user?.roles?.includes('admin') ?? false, [user]);
+  // Bulk creation state
+  const [showBulkCreate, setShowBulkCreate] = useState(false);
+  const [bulkEmails, setBulkEmails] = useState('');
+  const [defaultQuotaType, setDefaultQuotaType] = useState<'daily' | 'weekly' | 'unlimited'>('daily');
+  const [imageQuotaLimit, setImageQuotaLimit] = useState('50');
+  const [videoQuotaLimit, setVideoQuotaLimit] = useState('10');
+  const [editQuotaLimit, setEditQuotaLimit] = useState('30');
+  const [bulkCreateLoading, setBulkCreateLoading] = useState(false);
+
+  // Quota editing state
+  const [editingQuotas, setEditingQuotas] = useState(false);
+  const [quotaUpdates, setQuotaUpdates] = useState<Record<string, any>>({});
+
+  const isAdmin = user?.roles?.includes('admin') ?? false;
 
   useEffect(() => {
-    if (!token || !isAdmin) {
-      setLoading(false);
+    if (!initialising && !token) {
+      router.push('/login?redirect=/admin');
       return;
     }
 
-    const fetchConfig = async () => {
+    if (!initialising && !isAdmin) {
+      router.push('/');
+      return;
+    }
+
+    if (!initialising && isAdmin && token) {
+      loadUsers();
+    }
+  }, [initialising, isAdmin, token, router]);
+
+  const loadUsers = async () => {
+    try {
       setLoading(true);
       setError(null);
-      try {
-        const response = await apiFetch('/api/admin/models', {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
 
+      const response = await apiFetch('/api/admin/users');
         if (!response.ok) {
-          throw new Error('Failed to load admin configuration');
-        }
+        throw new Error('Failed to load users');
+      }
 
-        const payload: AdminModelConfigResponse = await response.json();
-        applyConfigurationPayload(payload);
+      const data = await response.json();
+      if (data.success && data.data?.users) {
+        setUsers(data.data.users);
+      }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load configuration');
+      setError(err instanceof Error ? err.message : 'Failed to load users');
       } finally {
         setLoading(false);
       }
     };
 
-    fetchConfig();
-  }, [token, isAdmin]);
-
-  const applyConfigurationPayload = (payload: AdminModelConfigResponse) => {
-    setRegistry(payload.data.registry);
-    setEffectiveConfig(payload.data.effective);
-
-    const nextState: CategoryStateMap = {};
-    Object.entries(payload.data.registry).forEach(([category, models]) => {
-      const settings = payload.data.settings?.[category] as AdminCategorySettings | undefined;
-      const effective = payload.data.effective?.[category];
-
-      const enabledFromSettings = settings?.enabled?.filter((id) => models.some((model) => model.id === id));
-      const enabledModels =
-        enabledFromSettings && enabledFromSettings.length > 0
-          ? enabledFromSettings
-          : effective?.enabled?.map((model) => model.id) ?? models.map((model) => model.id);
-
-      const resolvedDefault =
-        settings?.default ?? effective?.default ?? (enabledModels.length > 0 ? enabledModels[0] : null);
-
-      const quotas: Record<string, { daily: string; monthly: string }> = {};
-      models.forEach((model) => {
-        const quotaSource = settings?.quotas?.[model.id] ?? effective?.quotas?.[model.id];
-        quotas[model.id] = {
-          daily:
-            quotaSource && quotaSource.daily !== undefined && quotaSource.daily !== null
-              ? String(quotaSource.daily)
-              : '',
-          monthly:
-            quotaSource && quotaSource.monthly !== undefined && quotaSource.monthly !== null
-              ? String(quotaSource.monthly)
-              : '',
-        };
-      });
-
-      nextState[category] = {
-        enabled: new Set(enabledModels),
-        defaultModel: resolvedDefault ?? null,
-        quotas,
-      };
-    });
-
-    setCategoryState(nextState);
+  const handleSelectUser = async (user: User) => {
+    setSelectedUser(user);
+    await loadUserDetails(user.id);
   };
 
-  const handleToggleModel = (category: string, modelId: string, enabled: boolean) => {
-    setCategoryState((previous) => {
-      const current = previous[category];
-      if (!current) return previous;
-      const nextEnabled = new Set(current.enabled);
-      if (enabled) {
-        nextEnabled.add(modelId);
-      } else {
-        nextEnabled.delete(modelId);
-      }
-
-      let nextDefault = current.defaultModel;
-      if (nextDefault && !nextEnabled.has(nextDefault)) {
-        nextDefault = nextEnabled.size > 0 ? Array.from(nextEnabled)[0] : null;
-      }
-
-      return {
-        ...previous,
-        [category]: {
-          ...current,
-          enabled: nextEnabled,
-          defaultModel: nextDefault,
-        },
-      };
-    });
-  };
-
-  const handleQuotaChange = (category: string, modelId: string, field: 'daily' | 'monthly', value: string) => {
-    setCategoryState((previous) => {
-      const current = previous[category];
-      if (!current) return previous;
-      const quotaEntry = current.quotas[modelId] ?? { daily: '', monthly: '' };
-      const nextValue = normaliseQuotaInput(value);
-      return {
-        ...previous,
-        [category]: {
-          ...current,
-          quotas: {
-            ...current.quotas,
-            [modelId]: {
-              ...quotaEntry,
-              [field]: nextValue,
-            },
-          },
-        },
-      };
-    });
-  };
-
-  const handleDefaultChange = (category: string, modelId: string) => {
-    setCategoryState((previous) => {
-      const current = previous[category];
-      if (!current) return previous;
-      return {
-        ...previous,
-        [category]: {
-          ...current,
-          defaultModel: modelId,
-        },
-      };
-    });
-  };
-
-  const handleSaveCategory = async (category: string) => {
-    if (!token) return;
-    const state = categoryState[category];
-    if (!state) return;
-
-    setSavingCategory(category);
-    setError(null);
-    setSuccessMessage(null);
-
+  const loadUserDetails = async (userId: string) => {
     try {
-      const enabledModels = Array.from(state.enabled);
-      const quotasPayload: Record<string, ModelQuotaConfig> = {};
-
-      Object.entries(state.quotas).forEach(([modelId, quota]) => {
-        const entry: ModelQuotaConfig = {};
-        if (quota.daily !== undefined && quota.daily !== '') {
-          const value = Number(quota.daily);
-          if (!Number.isNaN(value)) {
-            entry.daily = value;
-          }
+      // Load quotas
+      const quotaResponse = await apiFetch(`/api/admin/quotas/${userId}`);
+      if (quotaResponse.ok) {
+        const quotaData = await quotaResponse.json();
+        if (quotaData.success && quotaData.data?.quotas) {
+          setSelectedUserQuotas(quotaData.data.quotas);
         }
-        if (quota.monthly !== undefined && quota.monthly !== '') {
-          const value = Number(quota.monthly);
-          if (!Number.isNaN(value)) {
-            entry.monthly = value;
-          }
-        }
-        if (Object.keys(entry).length > 0) {
-          quotasPayload[modelId] = entry;
-        }
-      });
-
-      const payload: AdminCategorySettings = {
-        enabled: enabledModels,
-        default: state.defaultModel,
-      };
-
-      if (Object.keys(quotasPayload).length > 0) {
-        payload.quotas = quotasPayload;
       }
 
-      const response = await apiFetch(`/api/admin/models/${category}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
+      // Load generations
+      const genResponse = await apiFetch(`/api/admin/users/${userId}/generations?limit=10`);
+      if (genResponse.ok) {
+        const genData = await genResponse.json();
+        if (genData.success && genData.data?.generations) {
+          setSelectedUserGenerations(genData.data.generations);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load user details:', err);
+    }
+  };
+
+  const handleBulkCreate = async () => {
+    try {
+      setBulkCreateLoading(true);
+      setError(null);
+
+      const emails = bulkEmails
+        .split('\n')
+        .map((email) => email.trim())
+        .filter((email) => email.length > 0);
+
+      if (emails.length === 0) {
+        setError('Please enter at least one email address');
+        return;
+      }
+
+      const defaultQuotas: Record<string, any> = {};
+
+      if (defaultQuotaType !== 'unlimited') {
+        defaultQuotas.image = {
+          type: defaultQuotaType,
+          limit: parseInt(imageQuotaLimit) || 50,
+        };
+        defaultQuotas.video = {
+          type: defaultQuotaType,
+          limit: parseInt(videoQuotaLimit) || 10,
+        };
+        defaultQuotas.edit = {
+          type: defaultQuotaType,
+          limit: parseInt(editQuotaLimit) || 30,
+        };
+      } else {
+        defaultQuotas.image = { type: 'unlimited', limit: null };
+        defaultQuotas.video = { type: 'unlimited', limit: null };
+        defaultQuotas.edit = { type: 'unlimited', limit: null };
+      }
+
+      const response = await apiFetch('/api/admin/users/bulk-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emails, defaultQuotas }),
       });
 
       if (!response.ok) {
-        const data = await response.json().catch(() => null);
-        const message =
-          (data && typeof data.detail === 'string' && data.detail) ||
-          (data && typeof data.error === 'string' && data.error) ||
-          'Failed to update configuration';
-        throw new Error(message);
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to create users');
       }
 
-      const updated: AdminModelConfigResponse = await response.json();
-      applyConfigurationPayload(updated);
-      setSuccessMessage(`Updated ${category} configuration`);
+      // Success - reload users
+      await loadUsers();
+      setShowBulkCreate(false);
+      setBulkEmails('');
+      setImageQuotaLimit('50');
+      setVideoQuotaLimit('10');
+      setEditQuotaLimit('30');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update configuration');
+      setError(err instanceof Error ? err.message : 'Failed to create users');
     } finally {
-      setSavingCategory(null);
+      setBulkCreateLoading(false);
+    }
+  };
+
+  const handleToggleActive = async (userId: string, currentActive: boolean) => {
+    try {
+      const response = await apiFetch(`/api/admin/users/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: !currentActive }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update user');
+      }
+
+      await loadUsers();
+      if (selectedUser?.id === userId) {
+        setSelectedUser({ ...selectedUser, isActive: !currentActive });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update user');
+    }
+  };
+
+  const handleResetPassword = async (userId: string) => {
+    try {
+      const response = await apiFetch(`/api/admin/users/${userId}/reset-password`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to reset password');
+      }
+
+      alert('Password reset flag set. User will need to set a new password on next login.');
+      await loadUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reset password');
+    }
+  };
+
+  const handleUpdateQuotas = async () => {
+    if (!selectedUser) return;
+
+    try {
+      const response = await apiFetch(`/api/admin/quotas/${selectedUser.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quotas: quotaUpdates }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update quotas');
+      }
+
+      await loadUserDetails(selectedUser.id);
+      setEditingQuotas(false);
+      setQuotaUpdates({});
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update quotas');
     }
   };
 
   if (initialising || loading) {
     return (
-      <div className="max-w-4xl mx-auto p-8">
-        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-6 text-center">
-          <div className="animate-spin h-8 w-8 border-4 border-blue-200 border-t-blue-600 rounded-full mx-auto mb-4" />
-          <p className="text-gray-600 dark:text-gray-300">Loading administration tools…</p>
+      <div className="flex items-center justify-center py-24">
+        <div className="text-center">
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-600 border-r-transparent mb-4"></div>
+          <p className="text-gray-600 dark:text-gray-300">Loading admin dashboard...</p>
         </div>
       </div>
     );
   }
 
-  if (!token || !isAdmin) {
+  if (!isAdmin) {
+    return null;
+  }
+
     return (
-      <div className="max-w-3xl mx-auto p-8">
-        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-xl p-6">
-          <h1 className="text-2xl font-semibold mb-2">Administrator access required</h1>
-          <p className="text-sm">
-            You need to sign in with an account that has administrator privileges to manage model availability and quotas.
+    <div className="max-w-7xl mx-auto space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">User Management</h1>
+          <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
+            Manage users you've invited to the platform
           </p>
         </div>
-      </div>
-    );
-  }
-
-  const categories = Object.keys(registry);
-
-  return (
-    <div className="max-w-5xl mx-auto p-8 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold mb-2 text-gray-900 dark:text-white">Model configuration</h1>
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          Enable or disable models and optionally define daily or monthly quotas. These settings take effect immediately for all users.
-        </p>
+        <Button onClick={() => setShowBulkCreate(true)}>
+          + Add Users
+        </Button>
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4">
-          <p>{error}</p>
+        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300">
+          {error}
         </div>
       )}
 
-      {successMessage && (
-        <div className="bg-green-50 border border-green-200 text-green-700 rounded-xl p-4">
-          <p>{successMessage}</p>
-        </div>
-      )}
-
-      {categories.map((category) => {
-        const models = registry[category] ?? [];
-        const state = categoryState[category];
-        const effective = effectiveConfig[category];
-        const enabledIds = state ? Array.from(state.enabled) : [];
-        const enabledModels = models.filter((model) => state?.enabled.has(model.id));
-
-        return (
-          <section key={category} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-6 space-y-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900 dark:text-white capitalize">{category} models</h2>
-                <p className="text-sm text-gray-600 dark:text-gray-300">
-                  Currently active: {effective?.enabled?.length ?? 0} enabled / {effective?.disabled?.length ?? 0} disabled.
-                </p>
-                {effective?.default && (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Active default: {effective.default}</p>
-                )}
-              </div>
-              <Button
-                onClick={() => handleSaveCategory(category)}
-                disabled={savingCategory === category}
-                variant="primary"
-              >
-                {savingCategory === category ? 'Saving…' : 'Save changes'}
-              </Button>
-            </div>
+      {/* Bulk Create Modal */}
+      {showBulkCreate && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
+            <h2 className="text-2xl font-bold mb-4 text-gray-900 dark:text-white">Add New Users</h2>
 
             <div className="space-y-4">
-              {models.map((model) => {
-                const isEnabled = state?.enabled.has(model.id) ?? false;
-                const quotas = state?.quotas?.[model.id] ?? { daily: '', monthly: '' };
-                return (
-                  <div key={model.id} className="border border-gray-200 dark:border-gray-800 rounded-lg p-4 bg-gray-50 dark:bg-gray-800/40">
-                    <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                      <div>
-                        <h3 className="text-lg font-medium text-gray-900 dark:text-white">{model.name}</h3>
-                        {model.description && (
-                          <p className="text-sm text-gray-600 dark:text-gray-300">{model.description}</p>
-                        )}
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">ID: {model.id}</p>
-                      </div>
-                      <label className="inline-flex items-center space-x-2 text-sm font-medium text-gray-700 dark:text-gray-200">
-                        <input
-                          type="checkbox"
-                          checked={isEnabled}
-                          onChange={(event) => handleToggleModel(category, model.id, event.target.checked)}
-                          className="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                        />
-                        <span>{isEnabled ? 'Enabled' : 'Disabled'}</span>
-                      </label>
-                    </div>
+              <Textarea
+                label="Email Addresses (one per line)"
+                value={bulkEmails}
+                onChange={(e) => setBulkEmails(e.target.value)}
+                placeholder="alice@example.com&#10;bob@example.com&#10;charlie@example.com"
+                rows={6}
+              />
 
-                    <div className="grid md:grid-cols-2 gap-4 mt-4">
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Daily quota</label>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          value={quotas.daily}
-                          onChange={(event) => handleQuotaChange(category, model.id, 'daily', event.target.value)}
-                          placeholder="Unlimited"
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm"
-                          disabled={!isEnabled}
-                        />
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Leave blank for unlimited daily usage.</p>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Monthly quota</label>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          value={quotas.monthly}
-                          onChange={(event) => handleQuotaChange(category, model.id, 'monthly', event.target.value)}
-                          placeholder="Unlimited"
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm"
-                          disabled={!isEnabled}
-                        />
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Leave blank for unlimited monthly usage.</p>
+              <Select
+                label="Default Quota Type"
+                value={defaultQuotaType}
+                onChange={(e) => setDefaultQuotaType(e.target.value as any)}
+                options={[
+                  { value: 'daily', label: 'Daily (resets at midnight UTC)' },
+                  { value: 'weekly', label: 'Weekly (resets Monday)' },
+                  { value: 'unlimited', label: 'Unlimited (no restrictions)' },
+                ]}
+              />
+
+              {defaultQuotaType !== 'unlimited' && (
+                <div className="grid grid-cols-3 gap-4">
+                  <Input
+                    label="Image Quota"
+                    type="number"
+                    value={imageQuotaLimit}
+                    onChange={(e) => setImageQuotaLimit(e.target.value)}
+                    min="1"
+                  />
+                  <Input
+                    label="Video Quota"
+                    type="number"
+                    value={videoQuotaLimit}
+                    onChange={(e) => setVideoQuotaLimit(e.target.value)}
+                    min="1"
+                  />
+                  <Input
+                    label="Edit Quota"
+                    type="number"
+                    value={editQuotaLimit}
+                    onChange={(e) => setEditQuotaLimit(e.target.value)}
+                    min="1"
+                  />
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-4">
+                <Button
+                  onClick={handleBulkCreate}
+                  isLoading={bulkCreateLoading}
+                  disabled={bulkCreateLoading}
+                >
+                  Create Users
+                </Button>
+                <Button
+                  onClick={() => {
+                    setShowBulkCreate(false);
+                    setBulkEmails('');
+                    setError(null);
+                  }}
+                  className="bg-gray-500 hover:bg-gray-600"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="grid md:grid-cols-3 gap-6">
+        {/* User List */}
+        <div className="md:col-span-1 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
+          <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
+            Your Users ({users.length})
+          </h2>
+
+          <div className="space-y-2 max-h-[600px] overflow-y-auto">
+            {users.length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
+                No users yet. Click "+ Add Users" to invite people.
+              </p>
+            ) : (
+              users.map((usr) => (
+                <button
+                  key={usr.id}
+                  onClick={() => handleSelectUser(usr)}
+                  className={`w-full text-left p-3 rounded-lg transition-colors ${
+                    selectedUser?.id === usr.id
+                      ? 'bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-500'
+                      : 'bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border-2 border-transparent'
+                  }`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                        {usr.email}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span
+                          className={`inline-block px-2 py-0.5 text-xs font-semibold rounded ${
+                            usr.isActive
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+                              : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+                          }`}
+                        >
+                          {usr.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                        {usr.isShared && (
+                          <span className="inline-block px-2 py-0.5 text-xs font-semibold bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300 rounded">
+                            Shared
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
-                );
-              })}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* User Details */}
+        <div className="md:col-span-2 space-y-6">
+          {selectedUser ? (
+            <>
+              {/* User Info Card */}
+              <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
+                <div className="flex items-start justify-between mb-4">
+              <div>
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                      {selectedUser.email}
+                    </h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      Created: {new Date(selectedUser.createdAt).toLocaleDateString()}
+                      {selectedUser.lastLoginAt && (
+                        <> • Last login: {new Date(selectedUser.lastLoginAt).toLocaleDateString()}</>
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => handleToggleActive(selectedUser.id, selectedUser.isActive)}
+                      className={selectedUser.isActive ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}
+                    >
+                      {selectedUser.isActive ? 'Deactivate' : 'Activate'}
+                    </Button>
+                    <Button
+                      onClick={() => handleResetPassword(selectedUser.id)}
+                      className="bg-yellow-600 hover:bg-yellow-700"
+                    >
+                      Reset Password
+                    </Button>
+                  </div>
+                </div>
+
+                {selectedUser.isShared && selectedUser.sharedWith && (
+                  <div className="p-3 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+                    <p className="text-sm text-purple-900 dark:text-purple-100 font-medium">
+                      Shared with other admins:
+                    </p>
+                    <p className="text-xs text-purple-700 dark:text-purple-300 mt-1">
+                      {selectedUser.sharedWith.join(', ')}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Quotas Card */}
+              <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Quotas</h3>
+                  {!editingQuotas ? (
+                    <Button onClick={() => setEditingQuotas(true)} className="text-sm">
+                      Edit Quotas
+                    </Button>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Button onClick={handleUpdateQuotas} className="text-sm">
+                        Save
+                      </Button>
+              <Button
+                        onClick={() => {
+                          setEditingQuotas(false);
+                          setQuotaUpdates({});
+                        }}
+                        className="text-sm bg-gray-500 hover:bg-gray-600"
+                      >
+                        Cancel
+              </Button>
+                    </div>
+                  )}
             </div>
 
-            <div className="pt-4 border-t border-gray-200 dark:border-gray-800">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Default model</label>
-              <select
-                value={state?.defaultModel ?? ''}
-                onChange={(event) => handleDefaultChange(category, event.target.value)}
-                className="w-full md:w-1/2 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-sm"
-                disabled={enabledIds.length === 0}
-              >
-                {enabledModels.length === 0 && <option value="">No models enabled</option>}
-                {enabledModels.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.name}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                This model will be selected by default for users in this category.
+                <div className="space-y-3">
+                  {selectedUserQuotas.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">No quotas set</p>
+                  ) : (
+                    selectedUserQuotas.map((quota) => (
+                      <div key={quota.generationType} className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div className="flex items-center justify-between">
+                      <div>
+                            <p className="text-sm font-medium text-gray-900 dark:text-white capitalize">
+                              {quota.generationType}
+                            </p>
+                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+                              {quota.quotaType === 'unlimited' ? (
+                                'Unlimited'
+                              ) : (
+                                <>
+                                  {quota.quotaUsed} / {quota.quotaLimit} used • {quota.quotaType}
+                                  {quota.quotaResetAt && (
+                                    <> • Resets {new Date(quota.quotaResetAt).toLocaleDateString()}</>
+                                  )}
+                                </>
+                              )}
+                            </p>
+                      </div>
+                          {editingQuotas && (
+                            <div className="flex gap-2">
+                              <select
+                                className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
+                                value={quotaUpdates[quota.generationType]?.type || quota.quotaType}
+                                onChange={(e) =>
+                                  setQuotaUpdates({
+                                    ...quotaUpdates,
+                                    [quota.generationType]: {
+                                      ...quotaUpdates[quota.generationType],
+                                      type: e.target.value,
+                                    },
+                                  })
+                                }
+                              >
+                                <option value="daily">Daily</option>
+                                <option value="weekly">Weekly</option>
+                                <option value="unlimited">Unlimited</option>
+                              </select>
+                              {(quotaUpdates[quota.generationType]?.type || quota.quotaType) !== 'unlimited' && (
+                        <input
+                                  type="number"
+                                  className="text-xs px-2 py-1 w-20 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700"
+                                  value={quotaUpdates[quota.generationType]?.limit ?? quota.quotaLimit}
+                                  onChange={(e) =>
+                                    setQuotaUpdates({
+                                      ...quotaUpdates,
+                                      [quota.generationType]: {
+                                        ...quotaUpdates[quota.generationType],
+                                        limit: parseInt(e.target.value) || 0,
+                                      },
+                                    })
+                                  }
+                                  min="1"
+                                />
+                              )}
+                            </div>
+                          )}
+                    </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Recent Generations */}
+              <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                  Recent Generations
+                </h3>
+
+                <div className="space-y-3">
+                  {selectedUserGenerations.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">No generations yet</p>
+                  ) : (
+                    selectedUserGenerations.map((gen) => (
+                      <div key={gen.id} className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-gray-900 dark:text-white">
+                              {gen.type === 'image' ? '🖼️' : '🎬'} {gen.model}
+                            </p>
+                            <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2">
+                              {gen.prompt}
+                            </p>
+                            <div className="flex items-center gap-3 mt-2 text-xs text-gray-500 dark:text-gray-400">
+                              <span>{new Date(gen.createdAt).toLocaleString()}</span>
+                              <span>•</span>
+                              <span>IP: {gen.ipAddress}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                    </div>
+                  </div>
+            </>
+          ) : (
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-12 text-center">
+              <p className="text-gray-500 dark:text-gray-400">
+                Select a user from the list to view details
               </p>
             </div>
-          </section>
-        );
-      })}
+          )}
+        </div>
+      </div>
     </div>
   );
 }

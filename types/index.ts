@@ -175,6 +175,7 @@ export interface LoginResponseData {
   token: string;
   user: LoginUser;
   config: LoginConfig;
+  requirePasswordSetup?: boolean;
 }
 
 export interface LoginResponse {

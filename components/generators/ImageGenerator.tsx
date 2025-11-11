@@ -8,6 +8,7 @@ import Textarea from '../ui/Textarea';
 import Select from '../ui/Select';
 import MultiFileUpload from '../ui/MultiFileUpload';
 import LoadingSpinner from '../shared/LoadingSpinner';
+import QuotaDisplay from './QuotaDisplay';
 import { CONSTANTS } from '@/lib/utils/constants';
 import { useAuth } from '@/lib/context/AuthContext';
 import { apiFetch, resolveApiUrl } from '@/lib/utils/apiClient';
@@ -221,6 +222,8 @@ export default function ImageGenerator() {
       <div className="grid md:grid-cols-2 gap-8">
         {/* Controls */}
         <div className="space-y-4">
+          {/* Quota Display */}
+          {token && <QuotaDisplay generationType="image" />}
           <h2 className="text-2xl font-bold mb-4">Image Generation</h2>
 
           <Textarea

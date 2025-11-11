@@ -9,6 +9,7 @@ import Select from '../ui/Select';
 import MultiFileUpload from '../ui/MultiFileUpload';
 import FileUpload from '../ui/FileUpload';
 import LoadingSpinner from '../shared/LoadingSpinner';
+import QuotaDisplay from './QuotaDisplay';
 import { CONSTANTS } from '@/lib/utils/constants';
 import { useAuth } from '@/lib/context/AuthContext';
 import { apiFetch, resolveApiUrl } from '@/lib/utils/apiClient';
@@ -338,6 +339,9 @@ export default function VideoGenerator() {
       <div className="grid md:grid-cols-2 gap-8">
         {/* Controls */}
         <div className="space-y-4">
+          {/* Quota Display */}
+          {token && <QuotaDisplay generationType="video" />}
+          
           <h2 className="text-2xl font-bold mb-4">Video Generation with Veo 3.1</h2>
 
           <Textarea

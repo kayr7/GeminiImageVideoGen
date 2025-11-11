@@ -12,6 +12,7 @@ type AuthContextValue = {
   config: LoginConfig | null;
   initialising: boolean;
   login: (username: string, password: string) => Promise<LoginResponseData>;
+  setPassword: (email: string, password: string) => Promise<LoginResponseData>;
   logout: () => void;
 };
 
@@ -147,6 +148,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const session = payload.data;
 
+    // Check if password setup is required
+    if (session.requirePasswordSetup) {
+      // Don't persist session yet, return session data for password setup flow
+      return session;
+    }
+
+    setToken(session.token);
+    setUser(session.user);
+    setConfig(session.config);
+    persistSession(session);
+
+    return session;
+  }, [persistSession]);
+
+  const setPassword = useCallback<AuthContextValue['setPassword']>(async (email, password) => {
+    const response = await apiFetch('/api/auth/set-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email, password }),
+    });
+
+    type ErrorPayload = { detail?: unknown; error?: unknown };
+
+    let payload: LoginResponse | ErrorPayload | null = null;
+    try {
+      payload = (await response.json()) as LoginResponse;
+    } catch (error) {
+      console.warn('Failed to parse set-password response', error);
+    }
+
+    const isLoginResponse = (value: unknown): value is LoginResponse => {
+      return (
+        typeof value === 'object' &&
+        value !== null &&
+        'success' in value &&
+        'data' in value
+      );
+    };
+
+    if (!payload || !isLoginResponse(payload) || !payload.success || !payload.data) {
+      const errorPayload = payload as ErrorPayload | null;
+      const detailMessage =
+        (errorPayload && typeof errorPayload.detail === 'string' ? errorPayload.detail : null) ??
+        (errorPayload && typeof errorPayload.error === 'string' ? errorPayload.error : null);
+      throw new Error(detailMessage ?? 'Failed to set password');
+    }
+
+    const session = payload.data;
+
     setToken(session.token);
     setUser(session.user);
     setConfig(session.config);
@@ -184,8 +236,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     config,
     initialising,
     login,
+    setPassword,
     logout,
-  }), [token, user, config, initialising, login, logout]);
+  }), [token, user, config, initialising, login, setPassword, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
