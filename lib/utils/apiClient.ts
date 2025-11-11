@@ -51,17 +51,12 @@ const dedupe = (values: string[]): string[] => {
 };
 
 const baseCandidates = dedupe(
-  [
-    process.env.NEXT_PUBLIC_API_URL,
-    process.env.NEXT_PUBLIC_BASE_PATH,
-    '/HdMImageVideo',
-    '',
-  ].map((value) => normaliseBaseUrl(value))
+  [process.env.NEXT_PUBLIC_API_URL, process.env.NEXT_PUBLIC_BASE_PATH]
+    .map((value) => normaliseBaseUrl(value))
+    .filter((value) => value.length > 0)
 );
 
-if (!baseCandidates.includes('')) {
-  baseCandidates.push('');
-}
+baseCandidates.push('');
 
 let resolvedBase: string | null = null;
 
