@@ -7,6 +7,179 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.0.0] - 2025-11-11
+
+### Added
+- **Complete User Management System** 🔐
+  - Database-backed user authentication with bcrypt password hashing (12 rounds)
+  - Admin-controlled user creation (no self-signup)
+  - First-time password setup flow for new users
+  - Password reset functionality for admins
+  - User activation/deactivation
+  - Many-to-many admin-user relationships (users can be managed by multiple admins)
+  - New database tables: `users`, `user_admins`, `user_quotas`, `user_sessions`
+  - Files: `backend/utils/user_manager.py`, `backend/utils/database.py` (migration #3)
+
+- **Quota Management System** 📊
+  - Per-user generation quotas (daily, weekly, or unlimited)
+  - Default quotas: 50 images/day, 10 videos/day, 30 edits/day
+  - Automatic quota reset at midnight UTC (daily) or Monday midnight (weekly)
+  - Manual quota reset by admins
+  - Quota checking before generation (returns 429 with reset time if exceeded)
+  - Quota increment after successful generation
+  - Files: `backend/utils/quota_manager.py`, `backend/routers/quotas.py`
+
+- **Authentication Endpoints** 🔑
+  - `POST /api/auth/login` - Login with first-time password detection
+  - `POST /api/auth/set-password` - Set password for new/reset users
+  - `POST /api/auth/logout` - Logout and invalidate session
+  - `POST /api/auth/change-password` - Change own password
+  - `GET /api/auth/me` - Get current user info with quota status
+  - Password strength validation (8+ chars, uppercase, lowercase, number)
+  - File: `backend/routers/auth.py`
+
+- **User Management Endpoints (Admin Only)** 👥
+  - `POST /api/admin/users/bulk-create` - Create multiple users by email
+  - `GET /api/admin/users` - List users managed by admin
+  - `GET /api/admin/users/{id}` - Get user details with quotas
+  - `PUT /api/admin/users/{id}` - Update user (activate/deactivate)
+  - `POST /api/admin/users/{id}/reset-password` - Force password reset
+  - `GET /api/admin/users/{id}/generations` - View user's media with email + IP
+  - Admins only see/manage users they invited
+  - File: `backend/routers/users.py`
+
+- **Quota Management Endpoints** 📈
+  - `GET /api/admin/quotas/{id}` - Get user quotas (admin)
+  - `PUT /api/admin/quotas/{id}` - Update user quotas (admin)
+  - `POST /api/admin/quotas/{id}/reset` - Reset quota manually (admin)
+  - `GET /api/admin/quotas/me/status` - Get own quota status (any user)
+  - File: `backend/routers/quotas.py`
+
+- **Dual Tracking for All Generations** 🔍
+  - Every generation now stores both `user_id` (UUID) and `ip_address`
+  - Complete accountability chain for abuse prevention
+  - Real user IDs instead of "anonymous"
+  - All generation and media tables updated
+
+### Changed
+- **Generation Endpoints Now Require Authentication** 🔒
+  - `POST /api/image/generate` - Requires auth, checks `image` quota
+  - `POST /api/image/edit` - Requires auth, checks `edit` quota
+  - `POST /api/video/generate` - Requires auth, checks `video` quota
+  - `POST /api/video/animate` - Requires auth, checks `video` quota
+  - All endpoints return `401 Unauthorized` without valid token
+  - All endpoints return `429 Too Many Requests` when quota exceeded
+  - Files: `backend/routers/image.py`, `backend/routers/video.py`
+
+- **Media Endpoints with Admin Scoping** 📁
+  - `GET /api/media/list` - Requires auth
+    - Regular users see only their own media
+    - Admins see media from users they invited (with email + IP)
+  - `GET /api/media/stats` - Requires auth
+    - Users see own stats, admins see aggregated stats
+  - `GET /api/media/{id}` - Requires auth
+    - Access control: users see own, admins see managed users
+  - `DELETE /api/media/{id}` - Requires auth
+    - Users delete own, admins delete managed users' media
+  - File: `backend/routers/media.py`
+
+- **Session Management** ⏱️
+  - Moved from in-memory to database-backed sessions
+  - Sessions persist across backend restarts
+  - Automatic cleanup of expired sessions
+  - 24-hour session expiration
+  - Activity tracking
+  - File: `backend/utils/session.py`
+
+- **Database Schema Updates** 💾
+  - Migration #3 adds user management tables
+  - All indexes and foreign keys properly set up
+  - Supports admin-user many-to-many relationships
+  - File: `backend/utils/database.py`
+
+- **Backward Compatibility** ♻️
+  - Admin credentials from `.env` still work
+  - Admin user auto-created/updated on startup
+  - Supports `APP_USERNAME`/`APP_PASSWORD` (and variations)
+  - File: `backend/utils/user_manager.py`
+
+### Security
+- **Bcrypt Password Hashing** 🔐
+  - 12 rounds for strong password protection
+  - Password strength validation enforced
+  - Secure password comparison with timing attack protection
+  
+- **Authentication Required** 🛡️
+  - All generation endpoints now require valid auth token
+  - Media access controlled by user ownership
+  - Admin operations require admin role
+
+- **Database Security** 🗄️
+  - Database files excluded from git (`.gitignore`)
+  - User passwords never stored in plain text
+  - Sessions stored securely with expiration
+
+### Dependencies
+- Added `bcrypt==4.1.2` for password hashing
+- File: `backend/requirements.txt`
+
+### Breaking Changes
+⚠️ **IMPORTANT**: This is a major version bump (2.x → 3.0.0) due to breaking changes:
+
+1. **All generation endpoints now require authentication**
+   - Old API calls without `Authorization: Bearer <token>` will fail with 401
+   - Frontend needs updating to include auth headers
+
+2. **Media endpoints require authentication**
+   - Gallery, stats, and media access all need auth tokens
+
+3. **"anonymous" user ID replaced with real user UUIDs**
+   - Old media entries may have "anonymous" as userId
+   - New entries use actual user UUIDs
+
+4. **Session structure changed**
+   - Old in-memory sessions invalidated
+   - New sessions stored in database
+
+### Migration Guide
+**For existing deployments:**
+
+1. **Backup your database** before upgrading:
+   ```bash
+   cp backend/.data/app.db backend/.data/app.db.backup
+   ```
+
+2. **Update backend dependencies**:
+   ```bash
+   pip install bcrypt==4.1.2
+   ```
+
+3. **Start backend** (migration runs automatically):
+   ```bash
+   python -m uvicorn main:app --reload
+   ```
+
+4. **Set admin credentials in `.env`**:
+   ```
+   APP_USERNAME=admin@example.com
+   APP_PASSWORD=YourSecurePassword123
+   ```
+
+5. **Admin user created automatically** on startup
+
+6. **Frontend update required** (not yet implemented):
+   - Login flow needs password setup support
+   - All API calls need Authorization headers
+   - User management UI needed
+
+### Known Issues
+- Frontend not yet updated (auth headers not sent)
+- Users will see 401 errors until frontend is updated
+- No user management UI yet
+- No quota display in frontend
+
+---
+
 ## [2.0.8] - 2025-11-11
 
 ### Added

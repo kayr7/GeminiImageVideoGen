@@ -3,21 +3,26 @@ Image generation endpoints using Google Gemini Python SDK
 Documentation: https://ai.google.dev/gemini-api/docs/imagen
 """
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from google import genai
 import os
 import base64
 from datetime import datetime
+from typing import Tuple
 
 from models import (
     ImageGenerationRequest,
     ImageEditRequest,
     ImageResponse,
     SuccessResponse,
+    LoginUser,
 )
 from utils.config import resolve_model_choice
 from utils.media_storage import get_media_storage
 from utils.rate_limiter import check_rate_limit
+from utils.auth import get_current_user_with_db
+from utils.user_manager import User
+from utils.quota_manager import QuotaManager
 
 router = APIRouter()
 
@@ -53,17 +58,29 @@ def get_client_ip(request: Request) -> str:
 
 
 @router.post("/generate", response_model=SuccessResponse)
-async def generate_image(req: ImageGenerationRequest, request: Request):
+async def generate_image(
+    req: ImageGenerationRequest,
+    request: Request,
+    auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
+):
     """
     Generate an image from a text prompt
     Supports both Nano Banana (gemini-2.5-flash-image) and Imagen models
+    Requires authentication and checks user quotas.
     """
     try:
+        login_user, db_user = auth
+
         # Get client IP for abuse tracking
         client_ip = get_client_ip(request)
 
+        # Check quota before generation
+        has_quota, error_msg = QuotaManager.check_quota(db_user.id, "image")
+        if not has_quota:
+            raise HTTPException(status_code=429, detail=error_msg)
+
         # Check rate limit
-        await check_rate_limit("anonymous", "image")
+        await check_rate_limit(db_user.id, "image")
 
         client = get_client()
 
@@ -142,12 +159,15 @@ async def generate_image(req: ImageGenerationRequest, request: Request):
                             metadata={
                                 "prompt": req.prompt,
                                 "model": model_name,
-                                "userId": "anonymous",
+                                "userId": db_user.id,  # Real user ID
                                 "mimeType": "image/png",
                                 "details": details if details else None,
                                 "ipAddress": client_ip,  # Track IP for abuse prevention
                             },
                         )
+
+                        # Increment quota after successful generation
+                        QuotaManager.increment_quota(db_user.id, "image")
 
                         # Return response with all string values
                         response_data = {
@@ -212,12 +232,15 @@ async def generate_image(req: ImageGenerationRequest, request: Request):
                         metadata={
                             "prompt": req.prompt,
                             "model": model_name,
-                            "userId": "anonymous",
+                            "userId": db_user.id,  # Real user ID
                             "mimeType": "image/png",
                             "details": details if details else None,
                             "ipAddress": client_ip,  # Track IP for abuse prevention
                         },
                     )
+
+                    # Increment quota after successful generation
+                    QuotaManager.increment_quota(db_user.id, "image")
 
                     return SuccessResponse(
                         success=True,
@@ -240,17 +263,29 @@ async def generate_image(req: ImageGenerationRequest, request: Request):
 
 
 @router.post("/edit", response_model=SuccessResponse)
-async def edit_image(req: ImageEditRequest, request: Request):
+async def edit_image(
+    req: ImageEditRequest,
+    request: Request,
+    auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
+):
     """
     Edit an image with a text prompt
     Supports multiple reference images
+    Requires authentication and checks user quotas.
     """
     try:
+        login_user, db_user = auth
+
         # Get client IP for abuse tracking
         client_ip = get_client_ip(request)
 
+        # Check quota before generation
+        has_quota, error_msg = QuotaManager.check_quota(db_user.id, "edit")
+        if not has_quota:
+            raise HTTPException(status_code=429, detail=error_msg)
+
         # Check rate limit
-        await check_rate_limit("anonymous", "image")
+        await check_rate_limit(db_user.id, "image")
 
         if not req.sourceImages or len(req.sourceImages) == 0:
             raise HTTPException(
@@ -323,12 +358,15 @@ async def edit_image(req: ImageEditRequest, request: Request):
                             metadata={
                                 "prompt": req.prompt,
                                 "model": model_name,
-                                "userId": "anonymous",
+                                "userId": db_user.id,  # Real user ID
                                 "mimeType": "image/png",
                                 "details": details,
                                 "ipAddress": client_ip,  # Track IP for abuse prevention
                             },
                         )
+
+                        # Increment quota after successful generation
+                        QuotaManager.increment_quota(db_user.id, "edit")
 
                         # Return response with all string values
                         response_data = {

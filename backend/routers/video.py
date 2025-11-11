@@ -3,25 +3,29 @@ Video generation endpoints using Google Gemini Python SDK with Veo
 Documentation: https://ai.google.dev/gemini-api/docs/video
 """
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from google import genai
 from google.genai import types
 import os
 import time
 import base64
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from models import (
     VideoGenerationRequest,
     VideoAnimateRequest,
     VideoResponse,
     SuccessResponse,
+    LoginUser,
 )
 from utils.config import resolve_model_choice
 from utils.media_storage import get_media_storage
 from utils.video_queue import get_video_queue
 from utils.rate_limiter import check_rate_limit
+from utils.auth import get_current_user_with_db
+from utils.user_manager import User
+from utils.quota_manager import QuotaManager
 
 router = APIRouter()
 
@@ -82,7 +86,11 @@ def create_image_from_bytes(
 
 
 @router.post("/generate", response_model=SuccessResponse)
-async def generate_video(req: VideoGenerationRequest, request: Request):
+async def generate_video(
+    req: VideoGenerationRequest,
+    request: Request,
+    auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
+):
     """
     Generate a video from a text prompt
     Supports:
@@ -91,14 +99,22 @@ async def generate_video(req: VideoGenerationRequest, request: Request):
     - Last frame (image as ending frame)
     - Reference images (up to 3, for visual guidance - not as frames)
 
+    Requires authentication and checks user quotas.
     See: https://ai.google.dev/gemini-api/docs/video
     """
     try:
+        login_user, db_user = auth
+
         # Get client IP for abuse tracking
         client_ip = get_client_ip(request)
 
+        # Check quota before generation
+        has_quota, error_msg = QuotaManager.check_quota(db_user.id, "video")
+        if not has_quota:
+            raise HTTPException(status_code=429, detail=error_msg)
+
         # Check rate limit
-        await check_rate_limit("anonymous", "video")
+        await check_rate_limit(db_user.id, "video")
 
         client = get_client()
 
@@ -175,7 +191,7 @@ async def generate_video(req: VideoGenerationRequest, request: Request):
         queue = get_video_queue()
         job = queue.create_job(
             {
-                "userId": "anonymous",
+                "userId": db_user.id,  # Real user ID
                 "prompt": req.prompt,
                 "model": model_name,
                 "mode": "text",
@@ -213,17 +229,29 @@ async def generate_video(req: VideoGenerationRequest, request: Request):
 
 
 @router.post("/animate", response_model=SuccessResponse)
-async def animate_image(req: VideoAnimateRequest, request: Request):
+async def animate_image(
+    req: VideoAnimateRequest,
+    request: Request,
+    auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
+):
     """
     Animate a still image into a video
     Uses the image as the first frame
+    Requires authentication and checks user quotas.
     """
     try:
+        login_user, db_user = auth
+
         # Get client IP for abuse tracking
         client_ip = get_client_ip(request)
 
+        # Check quota before generation
+        has_quota, error_msg = QuotaManager.check_quota(db_user.id, "video")
+        if not has_quota:
+            raise HTTPException(status_code=429, detail=error_msg)
+
         # Check rate limit
-        await check_rate_limit("anonymous", "video")
+        await check_rate_limit(db_user.id, "video")
 
         if not req.sourceImages or len(req.sourceImages) == 0:
             raise HTTPException(
@@ -271,7 +299,7 @@ async def animate_image(req: VideoAnimateRequest, request: Request):
         queue = get_video_queue()
         job = queue.create_job(
             {
-                "userId": "anonymous",
+                "userId": db_user.id,  # Real user ID
                 "prompt": req.prompt or "Animate this image",
                 "model": model_name,
                 "mode": "animate",
@@ -468,6 +496,9 @@ async def check_video_status(
         )
 
         print(f"Video saved with ID: {media_id}")
+
+        # Increment quota after successful video generation
+        QuotaManager.increment_quota(user_id, "video")
 
         # Update job
         queue.update_job(

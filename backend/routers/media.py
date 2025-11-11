@@ -1,11 +1,13 @@
 """Media storage endpoints for retrieving saved images and videos."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from typing import Optional
+from typing import Optional, Tuple
 
-from models import SuccessResponse
+from models import SuccessResponse, LoginUser
 from utils.media_storage import get_media_storage
-from utils.auth import require_admin
+from utils.auth import require_admin, get_current_user_with_db
+from utils.user_manager import User, UserManager
+from utils.database import get_connection
 
 router = APIRouter()
 
@@ -17,21 +19,78 @@ router = APIRouter()
 async def list_media(
     type: Optional[str] = Query(None, description="Filter by type: 'image' or 'video'"),
     limit: int = Query(50, ge=1, le=200),
+    auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
 ):
-    """List all media for the current user"""
+    """
+    List media for the current user.
+    Regular users see only their own media.
+    Admins see media from users they invited.
+    """
     try:
+        login_user, db_user = auth
         storage = get_media_storage()
-        media_list = storage.list_user_media("anonymous", media_type=type)
 
-        # Limit results
-        limited_list = media_list[:limit]
+        # Check if admin
+        is_admin = db_user.is_admin
 
-        # Add URL to each item
-        for item in limited_list:
-            item["url"] = f"/api/media/{item['id']}"
+        if is_admin:
+            # Admin: Get media from all users they invited
+            managed_user_ids = [
+                user.id for user in UserManager.get_admin_users(db_user.id)
+            ]
+            # Include admin's own media
+            managed_user_ids.append(db_user.id)
+
+            # Query database for media from managed users
+            with get_connection() as conn:
+                placeholders = ",".join("?" * len(managed_user_ids))
+                query = f"""
+                    SELECT id, type, prompt, model, user_id, created_at,
+                           file_size, mime_type, details, ip_address
+                    FROM media
+                    WHERE user_id IN ({placeholders})
+                """
+                params = list(managed_user_ids)
+
+                if type:
+                    query += " AND type = ?"
+                    params.append(type)
+
+                query += " ORDER BY created_at DESC LIMIT ?"
+                params.append(limit)
+
+                rows = conn.execute(query, params).fetchall()
+
+                # Build media list with user email and IP
+                media_list = []
+                for row in rows:
+                    user = UserManager.get_user_by_id(row["user_id"])
+                    media_item = {
+                        "id": row["id"],
+                        "type": row["type"],
+                        "prompt": row["prompt"],
+                        "model": row["model"],
+                        "userId": row["user_id"],
+                        "userEmail": user.email if user else "unknown",
+                        "createdAt": row["created_at"],
+                        "fileSize": row["file_size"],
+                        "mimeType": row["mime_type"],
+                        "details": row["details"],
+                        "ipAddress": row["ip_address"],
+                        "url": f"/api/media/{row['id']}",
+                    }
+                    media_list.append(media_item)
+        else:
+            # Regular user: Only see own media
+            media_list = storage.list_user_media(db_user.id, media_type=type)
+            media_list = media_list[:limit]
+
+            # Add URL to each item
+            for item in media_list:
+                item["url"] = f"/api/media/{item['id']}"
 
         return SuccessResponse(
-            success=True, data={"media": limited_list, "total": len(media_list)}
+            success=True, data={"media": media_list, "total": len(media_list)}
         )
 
     except Exception as e:
@@ -39,11 +98,22 @@ async def list_media(
 
 
 @router.get("/stats", response_model=SuccessResponse)
-async def get_stats():
-    """Get storage statistics"""
+async def get_stats(auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db)):
+    """
+    Get storage statistics.
+    Admins see stats for all users they manage.
+    Regular users see only their own stats.
+    """
     try:
+        login_user, db_user = auth
         storage = get_media_storage()
-        stats = storage.get_stats()
+
+        if db_user.is_admin:
+            # Admin: Get stats for all managed users
+            stats = storage.get_stats()
+        else:
+            # Regular user: Get only their stats
+            stats = storage.get_user_stats(db_user.id)
 
         return SuccessResponse(
             success=True,
@@ -56,14 +126,35 @@ async def get_stats():
 
 # Parameterized routes must come AFTER specific routes
 @router.get("/{media_id}")
-async def get_media(media_id: str):
-    """Retrieve a specific media file by ID"""
+async def get_media(
+    media_id: str, auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db)
+):
+    """
+    Retrieve a specific media file by ID.
+    Users can only access their own media.
+    Admins can access media from users they manage.
+    """
     try:
+        login_user, db_user = auth
         storage = get_media_storage()
         result = storage.get_media(media_id)
 
         if not result:
             raise HTTPException(status_code=404, detail="Media not found")
+
+        # Check if user has access to this media
+        media_user_id = result["metadata"].get("userId")
+
+        if not db_user.is_admin:
+            # Regular user: Can only access own media
+            if media_user_id != db_user.id:
+                raise HTTPException(status_code=403, detail="Access denied")
+        else:
+            # Admin: Can access media from users they manage
+            if media_user_id != db_user.id:
+                # Check if admin manages this user
+                if not UserManager.can_admin_manage_user(db_user.id, media_user_id):
+                    raise HTTPException(status_code=403, detail="Access denied")
 
         # Return binary file with appropriate headers
         return Response(
@@ -82,10 +173,36 @@ async def get_media(media_id: str):
 
 
 @router.delete("/{media_id}", response_model=SuccessResponse)
-async def delete_media(media_id: str, _: None = Depends(require_admin)):
-    """Delete a specific media item (admin only)."""
+async def delete_media(
+    media_id: str, auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db)
+):
+    """
+    Delete a specific media item.
+    Users can delete their own media.
+    Admins can delete media from users they manage.
+    """
     try:
+        login_user, db_user = auth
         storage = get_media_storage()
+
+        # Get media to check ownership
+        result = storage.get_media(media_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        media_user_id = result["metadata"].get("userId")
+
+        # Check permissions
+        if not db_user.is_admin:
+            # Regular user: Can only delete own media
+            if media_user_id != db_user.id:
+                raise HTTPException(status_code=403, detail="Access denied")
+        else:
+            # Admin: Can delete media from users they manage
+            if media_user_id != db_user.id:
+                if not UserManager.can_admin_manage_user(db_user.id, media_user_id):
+                    raise HTTPException(status_code=403, detail="Access denied")
+
         deleted = storage.delete_media(media_id)
 
         if not deleted:
