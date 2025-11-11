@@ -301,15 +301,19 @@ class GeminiClient {
 ### API Models
 
 **Image Generation Models:**
-- `imagen-4.0-generate-preview`: High quality, slower (primary)
-- `nano-banana-generate-preview`: Fast, lower cost (optional)
+- `gemini-2.5-flash-image`: Nano Banana - Fast, conversational (default, most reliable)
+- `imagen-4.0-generate-001`: Imagen 4.0 - Highest quality (may require special access)
+- ~~`imagen-3.0-generate-002`~~: Removed - Not available in v1beta API
 
 **Video Generation Models:**
-- `veo-3.1-generate-preview`: High quality video
-- `veo-3.1-fast-generate-preview`: Faster generation
+- `veo-3.1-generate-preview`: Veo 3.1 - High quality 8s video with audio
+- `veo-3.1-fast-generate-preview`: Veo 3.1 Fast - Faster generation
+- `veo-3.0-generate-001`: Veo 3.0 - Stable release
+- `veo-3.0-fast-generate-001`: Veo 3.0 Fast - Stable fast variant
+- `veo-2.0-generate-001`: Veo 2.0 - 5-8s video without audio
 
 **Music Generation Models:**
-- `music-generation-preview`: Text-to-music
+- Removed in v2.0.2 - Music generation feature discontinued
 
 ### Error Handling Strategy
 

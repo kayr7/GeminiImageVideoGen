@@ -1,4 +1,5 @@
 """Utility helpers for dynamic backend configuration and feature flags."""
+
 from __future__ import annotations
 
 import os
@@ -13,22 +14,6 @@ ModelInfoDict = Dict[str, Any]
 _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
     "image": [
         {
-            "id": "imagen-4.0-generate-001",
-            "name": "Imagen 4.0",
-            "description": "Highest quality image generation",
-            "price": 0.04,
-            "priceUnit": "per image",
-            "tier": "paid",
-        },
-        {
-            "id": "imagen-3.0-generate-002",
-            "name": "Imagen 3.0",
-            "description": "High quality image generation",
-            "price": 0.02,
-            "priceUnit": "per image",
-            "tier": "paid",
-        },
-        {
             "id": "gemini-2.5-flash-image",
             "name": "Nano Banana (Gemini 2.5 Flash)",
             "description": "Fast, conversational image generation",
@@ -36,6 +21,24 @@ _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
             "priceUnit": "per image",
             "tier": "paid",
         },
+        {
+            "id": "imagen-4.0-generate-001",
+            "name": "Imagen 4.0",
+            "description": "Highest quality image generation (requires special access)",
+            "price": 0.04,
+            "priceUnit": "per image",
+            "tier": "paid",
+        },
+        # Note: Imagen 3.0 has been removed as it's not available in v1beta API
+        # If you have access, you can add it back:
+        # {
+        #     "id": "imagen-3.0-generate-001",  # Note: -001 not -002
+        #     "name": "Imagen 3.0",
+        #     "description": "High quality image generation",
+        #     "price": 0.02,
+        #     "priceUnit": "per image",
+        #     "tier": "paid",
+        # },
     ],
     "video": [
         {
@@ -102,7 +105,9 @@ def _parse_csv(value: str | None) -> List[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def _normalise_registry(registry: Dict[str, List[ModelInfoDict]]) -> Dict[str, Dict[str, ModelInfoDict]]:
+def _normalise_registry(
+    registry: Dict[str, List[ModelInfoDict]],
+) -> Dict[str, Dict[str, ModelInfoDict]]:
     """Convert the registry into a mapping keyed by model id for quick lookup."""
     normalised: Dict[str, Dict[str, ModelInfoDict]] = {}
     for category, models in registry.items():
@@ -134,21 +139,29 @@ def _apply_model_overrides(
     admin_quotas = admin_overrides.get("quotas", {}) or {}
 
     if admin_enabled is not None:
-        enabled_ids = [model_id for model_id in admin_enabled if model_id in available_ids]
+        enabled_ids = [
+            model_id for model_id in admin_enabled if model_id in available_ids
+        ]
     else:
         enabled_env = set(_parse_csv(os.getenv(f"ENABLED_{category.upper()}_MODELS")))
         disabled_env = set(_parse_csv(os.getenv(f"DISABLED_{category.upper()}_MODELS")))
 
         if enabled_env:
-            enabled_ids = [model_id for model_id in available_ids if model_id in enabled_env]
+            enabled_ids = [
+                model_id for model_id in available_ids if model_id in enabled_env
+            ]
         else:
             enabled_ids = available_ids.copy()
 
         if disabled_env:
-            enabled_ids = [model_id for model_id in enabled_ids if model_id not in disabled_env]
+            enabled_ids = [
+                model_id for model_id in enabled_ids if model_id not in disabled_env
+            ]
 
     if admin_disabled:
-        enabled_ids = [model_id for model_id in enabled_ids if model_id not in admin_disabled]
+        enabled_ids = [
+            model_id for model_id in enabled_ids if model_id not in admin_disabled
+        ]
 
     default_override = None
     if admin_default and admin_default in enabled_ids:
@@ -161,7 +174,9 @@ def _apply_model_overrides(
     if not default_override and enabled_ids:
         default_override = enabled_ids[0]
 
-    disabled_ids = [model_id for model_id in available_ids if model_id not in enabled_ids]
+    disabled_ids = [
+        model_id for model_id in available_ids if model_id not in enabled_ids
+    ]
 
     quotas: Dict[str, Dict[str, Any]] = {}
     for model_id in available_ids:
@@ -204,7 +219,9 @@ def get_model_configuration() -> Dict[str, Any]:
     config: Dict[str, Any] = {}
     admin_settings = get_admin_model_settings()
     for category, models in _MODELS_BY_CATEGORY.items():
-        overrides = admin_settings.get(category, {}) if isinstance(admin_settings, dict) else {}
+        overrides = (
+            admin_settings.get(category, {}) if isinstance(admin_settings, dict) else {}
+        )
         config[category] = _apply_model_overrides(category, models, overrides)
     return config
 
@@ -232,14 +249,19 @@ def list_enabled_models(category: str) -> List[ModelInfoDict]:
     if category not in _MODELS_BY_CATEGORY:
         return []
     admin_settings = get_admin_model_settings()
-    overrides = admin_settings.get(category, {}) if isinstance(admin_settings, dict) else {}
+    overrides = (
+        admin_settings.get(category, {}) if isinstance(admin_settings, dict) else {}
+    )
     result = _apply_model_overrides(category, _MODELS_BY_CATEGORY[category], overrides)
     return result["enabled"]
 
 
 def get_model_registry() -> Dict[str, List[ModelInfoDict]]:
     """Expose the full registry for administrative tooling."""
-    return {category: list(models.values()) for category, models in _MODELS_BY_CATEGORY.items()}
+    return {
+        category: list(models.values())
+        for category, models in _MODELS_BY_CATEGORY.items()
+    }
 
 
 def resolve_model_choice(category: str, requested_model: str | None) -> ModelInfoDict:

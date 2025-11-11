@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.0.4] - 2025-11-11
+
+### Fixed
+- **Media Gallery 404 Error** 🔧
+  - Fixed FastAPI route ordering issue in `media.py`
+  - Moved specific routes (`/list`, `/stats`) before parameterized route (`/{media_id}`)
+  - Gallery now correctly loads media list instead of returning 404
+  - This is a common FastAPI routing pitfall - parameterized routes must come last
+
+- **Image Generation Model Error** 🎨
+  - Removed Imagen 3.0 from default model registry
+  - Model `imagen-3.0-generate-002` is not available in v1beta API
+  - Updated default to use Nano Banana (Gemini 2.5 Flash) which works reliably
+  - Added note about Imagen 4.0 requiring special access
+  - Users can manually add Imagen 3.0 back if they have API access
+
+### Changed
+- **Default Image Model Order**: Nano Banana is now first in the list (most reliable)
+- Added inline documentation about removed Imagen 3.0 model
+
+---
+
 ## [2.0.3] - 2025-11-08
 
 ### Added
