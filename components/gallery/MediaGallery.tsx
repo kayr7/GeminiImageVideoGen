@@ -44,11 +44,13 @@ const formatDate = (value: string): string => {
   return date.toLocaleString();
 };
 
+const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
+
 const resolveMediaUrl = (rawUrl: string): string => {
   if (!rawUrl) {
     return '';
   }
-  if (/^https?:/i.test(rawUrl)) {
+  if (URL_SCHEME_PATTERN.test(rawUrl)) {
     return rawUrl;
   }
   const prefixed = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`;
