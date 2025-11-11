@@ -1,4 +1,8 @@
-const RETRYABLE_STATUSES = new Set([404, 502, 503, 504]);
+const RETRYABLE_STATUSES = new Set([502, 503, 504]);
+
+const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
+
+const hasUrlScheme = (value: string): boolean => URL_SCHEME_PATTERN.test(value);
 
 const trimTrailingSlash = (value: string): string => {
   if (value === '/') {
@@ -50,13 +54,13 @@ const dedupe = (values: string[]): string[] => {
   return result;
 };
 
-const baseCandidates = dedupe(
+const envCandidates = dedupe(
   [process.env.NEXT_PUBLIC_API_URL, process.env.NEXT_PUBLIC_BASE_PATH]
     .map((value) => normaliseBaseUrl(value))
     .filter((value) => value.length > 0)
 );
 
-baseCandidates.push('');
+const baseCandidates = envCandidates.length > 0 ? envCandidates : [''];
 
 let resolvedBase: string | null = null;
 
@@ -65,6 +69,10 @@ const shouldRetry = (status: number): boolean => RETRYABLE_STATUSES.has(status);
 export const getApiBaseCandidates = (): readonly string[] => baseCandidates;
 
 export const resolveApiUrl = (path: string): string => {
+  if (hasUrlScheme(path)) {
+    return path;
+  }
+
   const base = resolvedBase ?? baseCandidates[0] ?? '';
   return joinBaseWithPath(base, path);
 };
