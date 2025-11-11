@@ -183,3 +183,37 @@ export interface LoginResponse {
   data: LoginResponseData;
 }
 
+// User Management Types
+export interface User {
+  id: string;
+  email: string;
+  isActive: boolean;
+  isAdmin: boolean;
+  requirePasswordReset: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string | null;
+  isShared?: boolean | null;
+  sharedWith?: string[] | null;
+  tags?: string[] | null;
+}
+
+export interface Quota {
+  generationType: string;
+  quotaType: string;
+  quotaLimit: number | null;
+  quotaUsed: number;
+  quotaRemaining: number | null;
+  quotaResetAt?: string | null;
+}
+
+export interface BulkCreateUsersRequest {
+  emails: string[];
+  defaultQuotas?: Record<string, { type: string; limit?: number }>;
+  defaultTags?: string[];
+}
+
+export interface UpdateUserTagsRequest {
+  tags: string[];
+}
+

@@ -19,6 +19,7 @@ interface User {
   lastLoginAt: string | null;
   isShared: boolean;
   sharedWith: string[] | null;
+  tags?: string[] | null;
 }
 
 interface Quota {
@@ -47,10 +48,15 @@ export default function AdminPage() {
   const [defaultQuotaType, setDefaultQuotaType] = useState<'limited' | 'unlimited'>('limited');
   const [imageQuotaLimit, setImageQuotaLimit] = useState('100');
   const [videoQuotaLimit, setVideoQuotaLimit] = useState('50');
+  const [bulkTags, setBulkTags] = useState('');
   const [bulkCreateLoading, setBulkCreateLoading] = useState(false);
 
   // Inline editing state
   const [editingQuotas, setEditingQuotas] = useState<Record<string, Record<string, any>>>({});
+  
+  // Tag management state
+  const [allTags, setAllTags] = useState<string[]>([]);
+  const [editingTags, setEditingTags] = useState<Record<string, string>>({});
 
   const isAdmin = user?.roles?.includes('admin') ?? false;
 
@@ -67,8 +73,23 @@ export default function AdminPage() {
 
     if (!initialising && isAdmin && token) {
       loadUsers();
+      loadAllTags();
     }
   }, [initialising, isAdmin, token, router]);
+
+  const loadAllTags = async () => {
+    try {
+      const response = await apiFetch('/api/admin/users/tags/all');
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.data?.tags) {
+          setAllTags(data.data.tags);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load tags:', err);
+    }
+  };
 
   const loadUsers = async () => {
     try {
@@ -140,10 +161,20 @@ export default function AdminPage() {
         defaultQuotas.video = { type: 'unlimited', limit: null };
       }
 
+      // Parse tags
+      const defaultTags = bulkTags
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0);
+
       const response = await apiFetch('/api/admin/users/bulk-create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ emails, defaultQuotas }),
+        body: JSON.stringify({ 
+          emails, 
+          defaultQuotas,
+          defaultTags: defaultTags.length > 0 ? defaultTags : undefined,
+        }),
       });
 
       if (!response.ok) {
@@ -152,10 +183,12 @@ export default function AdminPage() {
       }
 
       await loadUsers();
+      await loadAllTags(); // Refresh tags list
       setShowBulkCreate(false);
       setBulkEmails('');
       setImageQuotaLimit('100');
       setVideoQuotaLimit('50');
+      setBulkTags('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create users');
     } finally {
@@ -199,6 +232,45 @@ export default function AdminPage() {
       await loadUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reset password');
+    }
+  };
+
+  const startEditingTags = (userId: string, currentTags: string[]) => {
+    setEditingTags({
+      ...editingTags,
+      [userId]: currentTags.join(', '),
+    });
+  };
+
+  const cancelEditingTags = (userId: string) => {
+    const newEditing = { ...editingTags };
+    delete newEditing[userId];
+    setEditingTags(newEditing);
+  };
+
+  const handleSaveTags = async (userId: string) => {
+    try {
+      const tagsString = editingTags[userId] || '';
+      const tags = tagsString
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0);
+
+      const response = await apiFetch(`/api/admin/users/${userId}/tags`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tags }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update tags');
+      }
+
+      await loadUsers();
+      await loadAllTags(); // Refresh tags list
+      cancelEditingTags(userId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update tags');
     }
   };
 
@@ -358,6 +430,40 @@ export default function AdminPage() {
                 </div>
               )}
 
+              <div>
+                <Input
+                  label="Tags (comma-separated, optional)"
+                  value={bulkTags}
+                  onChange={(e) => setBulkTags(e.target.value)}
+                  placeholder="course, team-a, premium"
+                />
+                {allTags.length > 0 && (
+                  <div className="mt-2">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Existing tags:</p>
+                    <div className="flex flex-wrap gap-1">
+                      {allTags.map((tag) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => {
+                            const currentTags = bulkTags
+                              .split(',')
+                              .map((t) => t.trim())
+                              .filter((t) => t.length > 0);
+                            if (!currentTags.includes(tag)) {
+                              setBulkTags(currentTags.concat(tag).join(', '));
+                            }
+                          }}
+                          className="px-2 py-0.5 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                        >
+                          {tag}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex gap-3 pt-4">
                 <Button onClick={handleBulkCreate} isLoading={bulkCreateLoading} disabled={bulkCreateLoading}>
                   Create Users
@@ -366,6 +472,7 @@ export default function AdminPage() {
                   onClick={() => {
                     setShowBulkCreate(false);
                     setBulkEmails('');
+                    setBulkTags('');
                     setError(null);
                   }}
                   className="bg-gray-500 hover:bg-gray-600"
@@ -408,6 +515,9 @@ export default function AdminPage() {
                     <div className="text-[10px] font-normal text-gray-500 dark:text-gray-400 normal-case mt-0.5">
                       (includes editing)
                     </div>
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                    Tags
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                     Actions
@@ -465,6 +575,11 @@ export default function AdminPage() {
                       {/* Video Quota */}
                       <td className="px-4 py-4">
                         {renderQuotaCell(usr.id, 'video', videoQuota)}
+                      </td>
+
+                      {/* Tags */}
+                      <td className="px-4 py-4">
+                        {renderTagsCell(usr.id, usr.tags || [])}
                       </td>
 
                       {/* Actions */}
@@ -576,5 +691,67 @@ export default function AdminPage() {
         )}
     </div>
   );
+  }
+
+  function renderTagsCell(userId: string, tags: string[]) {
+    const isEditing = userId in editingTags;
+    
+    if (isEditing) {
+      return (
+        <div className="flex flex-col gap-2">
+          <input
+            type="text"
+            aria-label="Edit tags"
+            className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 w-full hover:border-blue-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            value={editingTags[userId]}
+            onChange={(e) =>
+              setEditingTags({ ...editingTags, [userId]: e.target.value })
+            }
+            placeholder="tag1, tag2, tag3"
+          />
+          <div className="flex gap-1">
+            <button
+              onClick={() => handleSaveTags(userId)}
+              className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors flex-1"
+              title="Save tags"
+            >
+              ✓ Save
+            </button>
+            <button
+              onClick={() => cancelEditingTags(userId)}
+              className="px-2 py-1 text-xs bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors flex-1"
+              title="Cancel"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-col gap-1">
+        {tags.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                className="px-2 py-0.5 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300 rounded font-medium"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span className="text-xs text-gray-400 dark:text-gray-500">No tags</span>
+        )}
+        <button
+          onClick={() => startEditingTags(userId, tags)}
+          className="text-xs text-blue-600 dark:text-blue-400 hover:underline w-fit"
+        >
+          Edit
+        </button>
+      </div>
+    );
   }
 }
