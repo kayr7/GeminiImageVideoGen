@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added proper handling for missing `ip_address` field in old database entries
   - Gallery now loads successfully even with entries created before IP tracking migration
 
+- **Video Generation Parameter Error** 🎬
+  - Completed video endpoint updates for IP tracking
+  - Fixed "'Request' object has no attribute 'model'" error
+  - Renamed all parameter references from `request.model` to `req.model` throughout video.py
+  - Both `/generate` and `/animate` endpoints now properly handle IP tracking
+
 ---
 
 ## [2.0.6] - 2025-11-11

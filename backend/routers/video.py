@@ -102,10 +102,10 @@ async def generate_video(req: VideoGenerationRequest, request: Request):
 
         client = get_client()
 
-        requested_model_id = (request.model or "").strip()
+        requested_model_id = (req.model or "").strip()
 
         try:
-            model_info = resolve_model_choice("video", request.model)
+            model_info = resolve_model_choice("video", req.model)
         except LookupError as error:
             status_code = 400 if requested_model_id else 503
             raise HTTPException(status_code=status_code, detail=str(error))
@@ -119,17 +119,17 @@ async def generate_video(req: VideoGenerationRequest, request: Request):
         config_kwargs = {}
 
         # Add negative prompt if provided
-        if request.negativePrompt:
-            config_kwargs["negativePrompt"] = request.negativePrompt
+        if req.negativePrompt:
+            config_kwargs["negativePrompt"] = req.negativePrompt
 
         # Add last frame if provided (ending frame) - goes in config
-        if request.lastFrame:
-            image_bytes, mime_type = extract_base64_bytes(request.lastFrame)
+        if req.lastFrame:
+            image_bytes, mime_type = extract_base64_bytes(req.lastFrame)
             config_kwargs["lastFrame"] = create_image_from_bytes(image_bytes, mime_type)
 
         # Add reference images if provided (up to 3, for content/style guidance) - goes in config
         # NOTE: Reference images are only supported by veo-3.1-generate-preview, NOT fast variants
-        if request.referenceImages and len(request.referenceImages) > 0:
+        if req.referenceImages and len(req.referenceImages) > 0:
             if not supports_reference_images:
                 raise HTTPException(
                     status_code=400,
@@ -138,7 +138,7 @@ async def generate_video(req: VideoGenerationRequest, request: Request):
                 )
 
             reference_images = []
-            for img_data in request.referenceImages[:3]:  # Max 3 images
+            for img_data in req.referenceImages[:3]:  # Max 3 images
                 image_bytes, mime_type = extract_base64_bytes(img_data)
                 # Create VideoGenerationReferenceImage objects
                 # Don't specify referenceType - let the API use default behavior
@@ -154,12 +154,12 @@ async def generate_video(req: VideoGenerationRequest, request: Request):
         # Build kwargs for generate_videos
         kwargs = {
             "model": model_name,
-            "prompt": request.prompt,
+            "prompt": req.prompt,
         }
 
         # Add first frame if provided (starting frame) - goes as 'image' parameter
-        if request.firstFrame:
-            image_bytes, mime_type = extract_base64_bytes(request.firstFrame)
+        if req.firstFrame:
+            image_bytes, mime_type = extract_base64_bytes(req.firstFrame)
             kwargs["image"] = create_image_from_bytes(image_bytes, mime_type)
 
         # Add config if we have one
@@ -176,7 +176,7 @@ async def generate_video(req: VideoGenerationRequest, request: Request):
         job = queue.create_job(
             {
                 "userId": "anonymous",
-                "prompt": request.prompt,
+                "prompt": req.prompt,
                 "model": model_name,
                 "mode": "text",
                 "status": "processing",
@@ -184,10 +184,10 @@ async def generate_video(req: VideoGenerationRequest, request: Request):
                 "jobId": operation.name,
                 "details": {
                     "mode": "text",
-                    "negativePrompt": request.negativePrompt,
-                    "firstFrame": request.firstFrame,
-                    "lastFrame": request.lastFrame,
-                    "referenceImages": request.referenceImages,
+                    "negativePrompt": req.negativePrompt,
+                    "firstFrame": req.firstFrame,
+                    "lastFrame": req.lastFrame,
+                    "referenceImages": req.referenceImages,
                 },
             }
         )
@@ -213,49 +213,52 @@ async def generate_video(req: VideoGenerationRequest, request: Request):
 
 
 @router.post("/animate", response_model=SuccessResponse)
-async def animate_image(request: VideoAnimateRequest):
+async def animate_image(req: VideoAnimateRequest, request: Request):
     """
     Animate a still image into a video
     Uses the image as the first frame
     """
     try:
+        # Get client IP for abuse tracking
+        client_ip = get_client_ip(request)
+
         # Check rate limit
         await check_rate_limit("anonymous", "video")
 
-        if not request.sourceImages or len(request.sourceImages) == 0:
+        if not req.sourceImages or len(req.sourceImages) == 0:
             raise HTTPException(
                 status_code=400, detail="At least one source image is required"
             )
 
         client = get_client()
 
-        requested_model_id = (request.model or "").strip()
+        requested_model_id = (req.model or "").strip()
 
         try:
-            model_info = resolve_model_choice("video", request.model)
+            model_info = resolve_model_choice("video", req.model)
         except LookupError as error:
             status_code = 400 if requested_model_id else 503
             raise HTTPException(status_code=status_code, detail=str(error))
         model_name = model_info["id"]
 
         # Use first image as the starting frame
-        image_bytes = extract_base64_bytes(request.sourceImages[0])
+        image_bytes = extract_base64_bytes(req.sourceImages[0])
 
         # Build kwargs for generate_videos
         kwargs = {
             "model": model_name,
-            "prompt": request.prompt or "Animate this image with smooth motion",
+            "prompt": req.prompt or "Animate this image with smooth motion",
             "first_frame": image_bytes,
         }
 
         # Add negative prompt if provided
-        if request.negativePrompt:
-            kwargs["negative_prompt"] = request.negativePrompt
+        if req.negativePrompt:
+            kwargs["negative_prompt"] = req.negativePrompt
 
         # Add additional source images as reference images if provided
-        if len(request.sourceImages) > 1:
+        if len(req.sourceImages) > 1:
             reference_images = []
-            for img_data in request.sourceImages[1:4]:  # Max 3 additional images
+            for img_data in req.sourceImages[1:4]:  # Max 3 additional images
                 img_bytes = extract_base64_bytes(img_data)
                 reference_images.append(img_bytes)
             kwargs["reference_images"] = reference_images
@@ -269,7 +272,7 @@ async def animate_image(request: VideoAnimateRequest):
         job = queue.create_job(
             {
                 "userId": "anonymous",
-                "prompt": request.prompt or "Animate this image",
+                "prompt": req.prompt or "Animate this image",
                 "model": model_name,
                 "mode": "animate",
                 "status": "processing",
@@ -277,8 +280,8 @@ async def animate_image(request: VideoAnimateRequest):
                 "jobId": operation.name,
                 "details": {
                     "mode": "animate",
-                    "negativePrompt": request.negativePrompt,
-                    "sourceImages": request.sourceImages,
+                    "negativePrompt": req.negativePrompt,
+                    "sourceImages": req.sourceImages,
                 },
             }
         )
