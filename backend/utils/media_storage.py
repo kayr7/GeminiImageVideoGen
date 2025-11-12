@@ -13,6 +13,7 @@ from utils.database import get_connection, initialize_database
 STORAGE_ROOT = Path(__file__).parent.parent / ".media-storage"
 VIDEOS_DIR = STORAGE_ROOT / "videos"
 IMAGES_DIR = STORAGE_ROOT / "images"
+THUMBNAILS_DIR = STORAGE_ROOT / "thumbnails"
 
 
 class MediaStorage:
@@ -24,7 +25,7 @@ class MediaStorage:
 
     def _ensure_directories(self) -> None:
         """Create storage directories if they don't exist."""
-        for directory in (STORAGE_ROOT, VIDEOS_DIR, IMAGES_DIR):
+        for directory in (STORAGE_ROOT, VIDEOS_DIR, IMAGES_DIR, THUMBNAILS_DIR):
             directory.mkdir(parents=True, exist_ok=True)
 
     def _row_to_metadata(self, row) -> Dict[str, Any]:

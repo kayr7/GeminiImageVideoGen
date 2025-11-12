@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from typing import Optional, Tuple
 from io import BytesIO
 from PIL import Image
+from pathlib import Path
 
 from models import SuccessResponse, LoginUser
-from utils.media_storage import get_media_storage
+from utils.media_storage import get_media_storage, THUMBNAILS_DIR
 from utils.auth import require_admin, get_current_user_with_db
 from utils.user_manager import User, UserManager
 from utils.database import get_connection
@@ -136,7 +137,7 @@ async def get_media_thumbnail(
 ):
     """
     Retrieve a thumbnail of a media file by ID.
-    For images: generates a resized thumbnail.
+    For images: generates a resized thumbnail (cached on disk).
     For videos: returns a placeholder (videos require video processing libs).
     Users can only access their own media.
     Admins can access media from users they manage.
@@ -166,6 +167,25 @@ async def get_media_thumbnail(
         media_type = result["metadata"].get("type", "").lower()
 
         if media_type == "image":
+            # Check if thumbnail already exists on disk
+            thumbnail_path = THUMBNAILS_DIR / f"{media_id}.jpg"
+
+            if thumbnail_path.exists():
+                # Return cached thumbnail
+                try:
+                    thumbnail_data = thumbnail_path.read_bytes()
+                    return Response(
+                        content=thumbnail_data,
+                        media_type="image/jpeg",
+                        headers={
+                            "Content-Disposition": f'inline; filename="{media_id}_thumb.jpg"',
+                            "Cache-Control": "public, max-age=31536000",
+                        },
+                    )
+                except Exception as e:
+                    # If reading cached thumbnail fails, regenerate
+                    print(f"Failed to read cached thumbnail: {e}")
+
             # Generate thumbnail for image
             try:
                 img = Image.open(BytesIO(result["data"]))
@@ -191,6 +211,13 @@ async def get_media_thumbnail(
                 thumbnail_io = BytesIO()
                 img.save(thumbnail_io, format="JPEG", quality=85, optimize=True)
                 thumbnail_data = thumbnail_io.getvalue()
+
+                # Save thumbnail to disk for future use
+                try:
+                    thumbnail_path.write_bytes(thumbnail_data)
+                except Exception as e:
+                    # Log error but continue (caching is optional)
+                    print(f"Failed to cache thumbnail: {e}")
 
                 return Response(
                     content=thumbnail_data,
@@ -311,6 +338,15 @@ async def delete_media(
 
         if not deleted:
             raise HTTPException(status_code=404, detail="Media not found")
+
+        # Delete cached thumbnail if it exists
+        thumbnail_path = THUMBNAILS_DIR / f"{media_id}.jpg"
+        if thumbnail_path.exists():
+            try:
+                thumbnail_path.unlink()
+            except Exception as e:
+                # Log error but don't fail the request
+                print(f"Failed to delete thumbnail cache: {e}")
 
         return SuccessResponse(
             success=True, data={"mediaId": media_id, "deleted": True}
