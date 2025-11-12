@@ -102,6 +102,7 @@ export default function MediaGallery() {
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [blobUrls, setBlobUrls] = useState<Record<string, string>>({});
+  const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
 
   const isAdmin = useMemo(() => user?.roles?.includes('admin') ?? false, [user?.roles]);
 
@@ -122,12 +123,30 @@ export default function MediaGallery() {
     }
   }, []);
 
+  // Create thumbnail blob URLs for media with authentication
+  const createThumbnailUrl = useCallback(async (mediaId: string): Promise<string | null> => {
+    try {
+      const response = await apiFetch(`/api/media/${mediaId}/thumbnail`);
+      if (!response.ok) {
+        console.error(`Failed to fetch thumbnail ${mediaId}:`, response.status);
+        return null;
+      }
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      return blobUrl;
+    } catch (err) {
+      console.error(`Error creating thumbnail URL for ${mediaId}:`, err);
+      return null;
+    }
+  }, []);
+
   // Clean up blob URLs on unmount
   useEffect(() => {
     return () => {
       Object.values(blobUrls).forEach((url) => URL.revokeObjectURL(url));
+      Object.values(thumbnailUrls).forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [blobUrls]);
+  }, [blobUrls, thumbnailUrls]);
 
   const loadMedia = useCallback(async () => {
     setLoading(true);
@@ -187,21 +206,32 @@ export default function MediaGallery() {
 
       // Create blob URLs for all media items (for authenticated access)
       const newBlobUrls: Record<string, string> = {};
+      const newThumbnailUrls: Record<string, string> = {};
+      
       await Promise.all(
         parsed.map(async (item) => {
+          // Create full-size blob URL (for opening in new page)
           const blobUrl = await createBlobUrl(item.id);
           if (blobUrl) {
             newBlobUrls[item.id] = blobUrl;
           }
+          
+          // Create thumbnail URL (for gallery display)
+          const thumbnailUrl = await createThumbnailUrl(item.id);
+          if (thumbnailUrl) {
+            newThumbnailUrls[item.id] = thumbnailUrl;
+          }
         })
       );
+      
       setBlobUrls(newBlobUrls);
+      setThumbnailUrls(newThumbnailUrls);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load gallery');
     } finally {
       setLoading(false);
     }
-  }, [createBlobUrl]);
+  }, [createBlobUrl, createThumbnailUrl]);
 
   useEffect(() => {
     void loadMedia();
@@ -285,21 +315,38 @@ export default function MediaGallery() {
                 key={item.id}
                 className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm flex flex-col"
               >
-                <div className="relative bg-gray-50 dark:bg-gray-800">
+                <div className="relative bg-gray-50 dark:bg-gray-800 cursor-pointer group" onClick={() => {
+                  const fullUrl = blobUrls[item.id] || item.url;
+                  window.open(fullUrl, '_blank');
+                }}>
                   {item.type === 'image' ? (
-                    <img 
-                      src={blobUrls[item.id] || item.url} 
-                      alt={item.prompt} 
-                      className="w-full object-contain max-h-72 bg-black" 
-                      loading="lazy" 
-                    />
+                    <div className="relative">
+                      <img 
+                        src={thumbnailUrls[item.id] || blobUrls[item.id] || item.url} 
+                        alt={item.prompt} 
+                        className="w-full object-contain max-h-72 bg-black" 
+                        loading="lazy" 
+                      />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                        <span className="opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-gray-800 text-gray-900 dark:text-white px-4 py-2 rounded-lg shadow-lg text-sm font-medium">
+                          Click to view full size
+                        </span>
+                      </div>
+                    </div>
                   ) : (
-                    <video
-                      controls
-                      preload="metadata"
-                      className="w-full max-h-72 bg-black"
-                      src={blobUrls[item.id] || item.url}
-                    />
+                    <div className="relative">
+                      <video
+                        preload="metadata"
+                        className="w-full max-h-72 bg-black pointer-events-none"
+                        src={thumbnailUrls[item.id] || blobUrls[item.id] || item.url}
+                        muted
+                      />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                        <span className="opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-gray-800 text-gray-900 dark:text-white px-4 py-2 rounded-lg shadow-lg text-sm font-medium">
+                          Click to view full video
+                        </span>
+                      </div>
+                    </div>
                   )}
                   <span className="absolute top-3 left-3 inline-flex items-center rounded-full bg-blue-600/90 text-white text-xs font-semibold px-3 py-1 uppercase tracking-wide">
                     {item.type}

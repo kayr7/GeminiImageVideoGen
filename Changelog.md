@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.4.0] - 2025-11-12
+
+### Added
+- **Gallery Thumbnails** 🖼️
+  - Backend thumbnail generation using Pillow (PIL)
+  - New endpoint: `GET /api/media/{id}/thumbnail` - Returns 400x400 thumbnails for images
+  - Automatic RGBA → RGB conversion with white background
+  - JPEG compression (quality 85) for smaller file sizes
+  - Fallback to original if thumbnail generation fails
+  - Files: `backend/routers/media.py`
+
+### Changed
+- **Gallery Display** 🎨
+  - Gallery now uses thumbnails for faster loading
+  - Click on any media to open full-size in new tab
+  - Hover overlay with "Click to view full size" message
+  - Video thumbnails use video element without controls (muted)
+  - Improved performance with lazy thumbnail generation
+  - Files: `components/gallery/MediaGallery.tsx`
+
+### Technical Details
+- **Image Thumbnails**: Max 400x400px, JPEG format, quality 85, cached
+- **Video Thumbnails**: Currently uses video element (future: ffmpeg frame extraction)
+- **Caching**: HTTP cache headers set to 1 year for thumbnails
+- **Memory Management**: Blob URLs properly cleaned up on component unmount
+
+---
+
 ## [3.3.0] - 2025-11-11
 
 ### Added

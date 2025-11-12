@@ -2,6 +2,8 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from typing import Optional, Tuple
+from io import BytesIO
+from PIL import Image
 
 from models import SuccessResponse, LoginUser
 from utils.media_storage import get_media_storage
@@ -10,6 +12,9 @@ from utils.user_manager import User, UserManager
 from utils.database import get_connection
 
 router = APIRouter()
+
+# Thumbnail configuration
+THUMBNAIL_MAX_SIZE = (400, 400)  # Maximum thumbnail dimensions
 
 # Note: Specific routes like /list and /stats must come BEFORE parameterized routes like /{media_id}
 # Otherwise FastAPI will try to match "list" as a media_id parameter
@@ -125,6 +130,105 @@ async def get_stats(auth: Tuple[LoginUser, User] = Depends(get_current_user_with
 
 
 # Parameterized routes must come AFTER specific routes
+@router.get("/{media_id}/thumbnail")
+async def get_media_thumbnail(
+    media_id: str, auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db)
+):
+    """
+    Retrieve a thumbnail of a media file by ID.
+    For images: generates a resized thumbnail.
+    For videos: returns a placeholder (videos require video processing libs).
+    Users can only access their own media.
+    Admins can access media from users they manage.
+    """
+    try:
+        login_user, db_user = auth
+        storage = get_media_storage()
+        result = storage.get_media(media_id)
+
+        if not result:
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        # Check if user has access to this media
+        media_user_id = result["metadata"].get("userId")
+
+        if not db_user.is_admin:
+            # Regular user: Can only access own media
+            if media_user_id != db_user.id:
+                raise HTTPException(status_code=403, detail="Access denied")
+        else:
+            # Admin: Can access media from users they manage
+            if media_user_id != db_user.id:
+                # Check if admin manages this user
+                if not UserManager.can_admin_manage_user(db_user.id, media_user_id):
+                    raise HTTPException(status_code=403, detail="Access denied")
+
+        media_type = result["metadata"].get("type", "").lower()
+
+        if media_type == "image":
+            # Generate thumbnail for image
+            try:
+                img = Image.open(BytesIO(result["data"]))
+
+                # Convert RGBA to RGB if necessary
+                if img.mode in ("RGBA", "LA", "P"):
+                    # Create white background
+                    background = Image.new("RGB", img.size, (255, 255, 255))
+                    if img.mode == "P":
+                        img = img.convert("RGBA")
+                    background.paste(
+                        img,
+                        mask=img.split()[-1] if img.mode in ("RGBA", "LA") else None,
+                    )
+                    img = background
+                elif img.mode != "RGB":
+                    img = img.convert("RGB")
+
+                # Create thumbnail
+                img.thumbnail(THUMBNAIL_MAX_SIZE, Image.Resampling.LANCZOS)
+
+                # Save to BytesIO
+                thumbnail_io = BytesIO()
+                img.save(thumbnail_io, format="JPEG", quality=85, optimize=True)
+                thumbnail_data = thumbnail_io.getvalue()
+
+                return Response(
+                    content=thumbnail_data,
+                    media_type="image/jpeg",
+                    headers={
+                        "Content-Disposition": f'inline; filename="{media_id}_thumb.jpg"',
+                        "Cache-Control": "public, max-age=31536000",
+                    },
+                )
+            except Exception as e:
+                # If thumbnail generation fails, return original
+                print(f"Thumbnail generation failed: {e}")
+                return Response(
+                    content=result["data"],
+                    media_type=result["metadata"]["mimeType"],
+                    headers={
+                        "Content-Disposition": f'inline; filename="{media_id}.{get_extension(result["metadata"]["mimeType"])}"',
+                        "Cache-Control": "public, max-age=31536000",
+                    },
+                )
+        else:
+            # For videos, return the original (thumbnail generation requires video processing)
+            # TODO: Implement video thumbnail extraction with ffmpeg
+            return Response(
+                content=result["data"],
+                media_type=result["metadata"]["mimeType"],
+                headers={
+                    "Content-Disposition": f'inline; filename="{media_id}.{get_extension(result["metadata"]["mimeType"])}"',
+                    "Cache-Control": "public, max-age=31536000",
+                },
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{media_id}")
 async def get_media(
     media_id: str, auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db)
