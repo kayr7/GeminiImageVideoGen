@@ -2,7 +2,7 @@
 # Gemini Image & Video Generation Platform
 
 **Version:** 1.0.0  
-**Last Updated:** November 8, 2025
+**Last Updated:** November 14, 2025
 
 This document provides a comprehensive overview of every file in the project, including its purpose, dependencies, and exports.
 
@@ -147,6 +147,24 @@ This document provides a comprehensive overview of every file in the project, in
 **Dependencies**: React, MusicGenerator component  
 **Exports**: Default MusicPage component  
 **Features**: Music generation UI, audio player, download
+
+### `/app/text/page.tsx`
+**Purpose**: Text generation page with single-turn and multi-turn chat modes  
+**Dependencies**: React, useAuth, text API utilities, UI components  
+**Exports**: Default TextGenerationPage component  
+**Features**:
+- Mode selector (Single-turn / Multi-turn Chat)
+- Template selector with save/update functionality
+- System prompt selector with save/update functionality
+- Real-time {{variable}} detection and dynamic input fields
+- Single-turn text generation with response display
+- Multi-turn chat UI with message bubbles and session management
+- Save/update modals for templates and system prompts
+- Copy to clipboard functionality
+- Error handling and loading states
+- Responsive layout with sidebar
+- Dark mode support
+**Size**: 950+ lines of comprehensive React/TypeScript code
 
 ---
 
@@ -355,6 +373,72 @@ generateMusic({
 }>
 ```
 
+### `/lib/text/api.ts`
+**Purpose**: Text generation API client utilities  
+**Dependencies**: apiClient (apiFetch), text-generation types  
+**Exports**:
+- `templateAPI` - Template CRUD operations
+- `systemPromptAPI` - System prompt CRUD operations
+- `textGenerationAPI` - Single-turn generation
+- `chatAPI` - Multi-turn chat operations
+
+**Key Functions**:
+```typescript
+templateAPI: {
+  list(mediaType): Promise<PromptTemplate[]>,
+  get(id): Promise<PromptTemplate>,
+  create(data): Promise<PromptTemplate>,
+  update(id, data): Promise<PromptTemplate>,
+  delete(id): Promise<void>
+}
+
+systemPromptAPI: {
+  list(mediaType): Promise<SystemPrompt[]>,
+  get(id): Promise<SystemPrompt>,
+  create(data): Promise<SystemPrompt>,
+  update(id, data): Promise<SystemPrompt>,
+  delete(id): Promise<void>
+}
+
+textGenerationAPI: {
+  generate(request): Promise<TextGeneration>
+}
+
+chatAPI: {
+  listSessions(): Promise<ChatSession[]>,
+  getSession(id): Promise<ChatSession>,
+  createSession(data): Promise<ChatSession>,
+  updateSession(id, data): Promise<ChatSession>,
+  deleteSession(id): Promise<void>,
+  getMessages(sessionId): Promise<ChatMessage[]>,
+  sendMessage(sessionId, data): Promise<ChatMessage>
+}
+```
+
+### `/lib/text/utils.ts`
+**Purpose**: Template variable extraction and processing utilities  
+**Dependencies**: None (pure functions)  
+**Exports**:
+- `extractVariables(template: string): string[]` - Extract {{variable}} names
+- `fillTemplate(template: string, values: Record<string, string>): string` - Replace variables with values
+- `isTemplateFilled(template: string, values: Record<string, string>): boolean` - Check if all variables are filled
+- `getUnfilledVariables(template: string, values: Record<string, string>): string[]` - Get list of unfilled variables
+
+**Key Functions**:
+```typescript
+// Extract variables from template using regex: /\{\{(\w+)\}\}/g
+extractVariables("Hello {{name}}, welcome to {{place}}!")
+// Returns: ["name", "place"]
+
+// Fill template with values
+fillTemplate("Hello {{name}}!", { name: "World" })
+// Returns: "Hello World!"
+
+// Validate all variables are filled
+isTemplateFilled("{{a}} {{b}}", { a: "1", b: "2" })
+// Returns: true
+```
+
 ### `/src/lib/rate-limit/limiter.ts`
 **Purpose**: Rate limiting logic and enforcement  
 **Dependencies**: storage, config, types  
@@ -531,6 +615,118 @@ export interface MusicResponse {
   audioUrl: string;
   duration: number;
   generatedAt: Date;
+}
+```
+
+### `/types/text-generation.ts`
+**Purpose**: TypeScript types for text generation, templates, system prompts, and chat  
+**Dependencies**: None  
+**Exports**: 
+```typescript
+// Template Management
+export interface PromptTemplate {
+  id: string;
+  userId: string;
+  name: string;
+  mediaType: 'text' | 'image' | 'video';
+  templateText: string;
+  variables: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateTemplateRequest {
+  name: string;
+  mediaType: 'text' | 'image' | 'video';
+  templateText: string;
+  variables?: string[];
+}
+
+export interface UpdateTemplateRequest {
+  name?: string;
+  templateText?: string;
+  variables?: string[];
+}
+
+// System Prompts
+export interface SystemPrompt {
+  id: string;
+  userId: string;
+  name: string;
+  mediaType: 'text' | 'image' | 'video';
+  promptText: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSystemPromptRequest {
+  name: string;
+  mediaType: 'text' | 'image' | 'video';
+  promptText: string;
+}
+
+export interface UpdateSystemPromptRequest {
+  name?: string;
+  promptText?: string;
+}
+
+// Text Generation
+export interface TextGeneration {
+  id: string;
+  userId: string;
+  userMessage: string;
+  systemPrompt?: string;
+  systemPromptId?: string;
+  templateId?: string;
+  variableValues?: Record<string, string>;
+  modelResponse: string;
+  model: string;
+  createdAt: string;
+}
+
+export interface GenerateTextRequest {
+  userMessage: string;
+  systemPrompt?: string;
+  systemPromptId?: string;
+  templateId?: string;
+  variableValues?: Record<string, string>;
+  model?: string;
+}
+
+// Chat Sessions
+export interface ChatSession {
+  id: string;
+  userId: string;
+  name?: string;
+  systemPrompt?: string;
+  systemPromptId?: string;
+  model: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  sessionId: string;
+  role: 'user' | 'model';
+  content: string;
+  createdAt: string;
+}
+
+export interface CreateChatSessionRequest {
+  name?: string;
+  systemPrompt?: string;
+  systemPromptId?: string;
+  model?: string;
+}
+
+export interface UpdateChatSessionRequest {
+  name?: string;
+}
+
+export interface SendChatMessageRequest {
+  message: string;
+  model?: string;
 }
 ```
 
