@@ -61,3 +61,8 @@ backend/routers/__pycache__/templates.cpython-311.pyc
 backend/routers/__pycache__/text_generation.cpython-311.pyc
 */__pycache__/
 */*/__pycache__/
+backend/routers/__pycache__/media.cpython-311.pyc
+backend/routers/__pycache__/users.cpython-311.pyc
+backend/routers/__pycache__/video.cpython-311.pyc
+backend/utils/__pycache__/media_storage.cpython-311.pyc
+backend/routers/__pycache__/media.cpython-311.pyc
