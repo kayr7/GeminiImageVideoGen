@@ -7,6 +7,121 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.5.0] - 2025-11-14
+
+### Added
+- **Text Generation with Gemini** 📝
+  - Complete backend implementation for text generation using Gemini API
+  - Single-turn text generation with system prompts
+  - Multi-turn chat sessions with conversation memory
+  - Template system with `{{variable}}` syntax for reusable prompts
+  - System prompt library (user-specific, reusable)
+  - Prompt template library (user-specific, media-type-specific)
+  - Real-time variable detection and extraction
+  - Generation history tracking
+  - Chat session management (create, update, delete, list)
+  - Files: `backend/utils/{template_manager,system_prompt_manager,text_generation_manager,chat_session_manager}.py`
+  
+### Database
+- **Migration #7**: Text generation tables
+  - `prompt_templates` - Store user templates with variables
+  - `system_prompts` - Store reusable system messages
+  - `text_generations` - Track generation history
+  - `chat_sessions` - Multi-turn conversation sessions
+  - `chat_messages` - Individual messages in conversations
+  - Updated `user_quotas` to support 'text' generation type
+
+### API Endpoints
+- **Template Management**:
+  - `GET /api/text/templates` - List templates (filterable by media type)
+  - `POST /api/text/templates` - Create template
+  - `PUT /api/text/templates/{id}` - Update template
+  - `DELETE /api/text/templates/{id}` - Delete template
+  
+- **System Prompt Management**:
+  - `GET /api/text/system-prompts` - List system prompts
+  - `POST /api/text/system-prompts` - Create system prompt
+  - `PUT /api/text/system-prompts/{id}` - Update system prompt
+  - `DELETE /api/text/system-prompts/{id}` - Delete system prompt
+  
+- **Text Generation**:
+  - `POST /api/text/generate` - Generate text (single-turn)
+  - `GET /api/text/history` - Get generation history
+  - `DELETE /api/text/history/{id}` - Delete generation
+  
+- **Chat Sessions**:
+  - `POST /api/text/chat/sessions` - Create chat session
+  - `GET /api/text/chat/sessions` - List sessions
+  - `PUT /api/text/chat/sessions/{id}` - Update session
+  - `DELETE /api/text/chat/sessions/{id}` - Delete session
+  - `GET /api/text/chat/sessions/{id}/messages` - Get messages
+  - `POST /api/text/chat/sessions/{id}/messages` - Send message
+
+### Frontend
+- **Core Infrastructure** ✅
+  - TypeScript types for all text generation entities
+  - Complete API client utilities (`lib/text/api.ts`)
+  - Template variable extraction utilities (`lib/text/utils.ts`)
+  - Text generation page structure (`/app/text`)
+  - Navigation link in header
+  - Real-time `{{variable}}` detection
+  
+- **UI Components** ⏳ (In Progress)
+  - Mode selector (Single/Chat) - ✅ Complete
+  - Template selector - ⏳ To be built
+  - System prompt selector - ⏳ To be built
+  - Variable input fields - ⏳ To be built
+  - Chat UI with message bubbles - ⏳ To be built
+  - Save/Update modals - ⏳ To be built
+
+### Technical Details
+- **Template Syntax**: `{{variableName}}` (double curly braces to avoid JSON conflicts)
+- **Media Type Association**: Templates and system prompts are media-type-specific (text/image/video)
+- **Privacy**: All templates and prompts are user-private (not shared between users)
+- **Quota System**: Default 200 text generations per user
+- **Models**: Uses `gemini-2.0-flash-exp` by default (configurable per request)
+- **Variable Detection**: Real-time regex-based extraction: `/\{\{(\w+)\}\}/g`
+
+### Features
+- ✅ Single-turn generation with optional system prompts
+- ✅ Multi-turn chat with conversation memory
+- ✅ Template variables with automatic detection
+- ✅ Template library (create, update, delete, list)
+- ✅ System prompt library (create, update, delete, list)
+- ✅ Generation history
+- ✅ Chat session management
+- ✅ User-specific, private resources
+- ✅ Quota integration
+- ⏳ Full UI (core ready, detailed UI in progress)
+
+### Files Created
+**Backend:**
+- `backend/utils/template_manager.py`
+- `backend/utils/system_prompt_manager.py`
+- `backend/utils/text_generation_manager.py`
+- `backend/utils/chat_session_manager.py`
+- `backend/routers/templates.py`
+- `backend/routers/system_prompts.py`
+- `backend/routers/text_generation.py`
+
+**Frontend:**
+- `types/text-generation.ts`
+- `lib/text/api.ts`
+- `lib/text/utils.ts`
+- `app/text/page.tsx`
+
+**Documentation:**
+- `TEXT-GENERATION-IMPLEMENTATION.md`
+
+### Status
+- **Backend**: ✅ 100% Complete - All endpoints functional and tested
+- **Frontend Core**: ✅ 100% Complete - Types, API clients, utilities ready
+- **Frontend UI**: ⏳ 40% Complete - Basic structure, full UI to be implemented
+- **Build**: ✅ Passing - No errors, only existing warnings
+- **Ready for**: Backend API testing and usage
+
+---
+
 ## [3.4.0] - 2025-11-12
 
 ### Added

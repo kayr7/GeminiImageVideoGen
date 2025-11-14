@@ -7,7 +7,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 
-from routers import admin, auth, config, image, media, usage, video, users, quotas
+from routers import (
+    admin,
+    auth,
+    config,
+    image,
+    media,
+    usage,
+    video,
+    users,
+    quotas,
+    templates,
+    system_prompts,
+    text_generation,
+)
 from utils.user_manager import ensure_env_admin_exists
 from utils.database import initialize_database
 
@@ -49,6 +62,9 @@ app.include_router(image.router, prefix="/api/image", tags=["Image Generation"])
 app.include_router(video.router, prefix="/api/video", tags=["Video Generation"])
 app.include_router(media.router, prefix="/api/media", tags=["Media Storage"])
 app.include_router(usage.router, prefix="/api/usage", tags=["Usage Tracking"])
+app.include_router(templates.router, prefix="/api/text/templates", tags=["Text Templates"])
+app.include_router(system_prompts.router, prefix="/api/text/system-prompts", tags=["System Prompts"])
+app.include_router(text_generation.router, prefix="/api/text", tags=["Text Generation"])
 
 
 @app.get("/")
@@ -60,6 +76,7 @@ async def root():
         "endpoints": {
             "image": "/api/image",
             "video": "/api/video",
+            "text": "/api/text",
             "media": "/api/media",
             "usage": "/api/usage",
         },

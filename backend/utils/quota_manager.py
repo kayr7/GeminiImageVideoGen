@@ -61,6 +61,7 @@ class QuotaManager:
     DEFAULT_QUOTAS = {
         "image": {"type": "limited", "limit": 100},
         "video": {"type": "limited", "limit": 50},
+        "text": {"type": "limited", "limit": 200},
     }
 
     @staticmethod

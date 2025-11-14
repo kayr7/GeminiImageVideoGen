@@ -224,6 +224,124 @@ MIGRATIONS: list[tuple[int, Iterable[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_user_tags_tag ON user_tags(tag)",
         ),
     ),
+    (
+        7,
+        (
+            # Text generation system: prompt templates, system prompts, and chat sessions
+            # Prompt templates (user-specific, media-type-specific)
+            """
+            CREATE TABLE IF NOT EXISTS prompt_templates (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                media_type TEXT NOT NULL CHECK (media_type IN ('text', 'image', 'video')),
+                template_text TEXT NOT NULL,
+                variables TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE(user_id, name, media_type)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_prompt_templates_user_id ON prompt_templates(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_prompt_templates_media_type ON prompt_templates(user_id, media_type)",
+            # System prompts (user-specific, media-type-specific)
+            """
+            CREATE TABLE IF NOT EXISTS system_prompts (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                media_type TEXT NOT NULL CHECK (media_type IN ('text', 'image', 'video')),
+                prompt_text TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE(user_id, name, media_type)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_system_prompts_user_id ON system_prompts(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_system_prompts_media_type ON system_prompts(user_id, media_type)",
+            # Text generation history
+            """
+            CREATE TABLE IF NOT EXISTS text_generations (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                mode TEXT NOT NULL CHECK (mode IN ('chat', 'single')),
+                system_prompt TEXT,
+                system_prompt_id TEXT,
+                user_message TEXT,
+                template_id TEXT,
+                filled_message TEXT,
+                variable_values TEXT,
+                model_response TEXT,
+                model TEXT,
+                ip_address TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (system_prompt_id) REFERENCES system_prompts(id) ON DELETE SET NULL,
+                FOREIGN KEY (template_id) REFERENCES prompt_templates(id) ON DELETE SET NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_text_generations_user_id ON text_generations(user_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_text_generations_mode ON text_generations(mode)",
+            # Chat sessions
+            """
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT,
+                system_prompt TEXT,
+                system_prompt_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (system_prompt_id) REFERENCES system_prompts(id) ON DELETE SET NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id, updated_at DESC)",
+            # Chat messages
+            """
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL CHECK (role IN ('user', 'model')),
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id, created_at ASC)",
+            # Add 'text' generation type to quotas
+            """
+            CREATE TABLE IF NOT EXISTS user_quotas_new (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                generation_type TEXT NOT NULL CHECK (generation_type IN ('image', 'video', 'text')),
+                quota_type TEXT NOT NULL CHECK (quota_type IN ('daily', 'weekly', 'limited', 'unlimited')),
+                quota_limit INTEGER,
+                quota_used INTEGER DEFAULT 0,
+                quota_reset_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """,
+            # Copy existing quotas
+            """
+            INSERT INTO user_quotas_new (id, user_id, generation_type, quota_type, quota_limit, quota_used, quota_reset_at, created_at, updated_at)
+            SELECT id, user_id, generation_type, quota_type, quota_limit, quota_used, quota_reset_at, created_at, updated_at
+            FROM user_quotas
+            """,
+            # Drop old table
+            "DROP TABLE user_quotas",
+            # Rename new table
+            "ALTER TABLE user_quotas_new RENAME TO user_quotas",
+            # Recreate indexes
+            "CREATE INDEX IF NOT EXISTS idx_user_quotas_user_id ON user_quotas(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_user_quotas_type ON user_quotas(user_id, generation_type)",
+            "CREATE INDEX IF NOT EXISTS idx_user_quotas_reset ON user_quotas(quota_reset_at)",
+        ),
+    ),
 ]
 
 _db_initialized = False

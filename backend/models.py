@@ -219,3 +219,107 @@ class QuotaResponse(BaseModel):
     quotaUsed: int
     quotaRemaining: Optional[int]
     quotaResetAt: Optional[str]
+
+
+# Text Generation Models
+class CreateTemplateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    mediaType: str = Field(..., pattern="^(text|image|video)$")
+    templateText: str = Field(..., min_length=1, max_length=10000)
+    variables: List[str] = Field(default_factory=list)
+
+
+class UpdateTemplateRequest(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    templateText: Optional[str] = Field(None, min_length=1, max_length=10000)
+    variables: Optional[List[str]] = None
+
+
+class TemplateResponse(BaseModel):
+    id: str
+    userId: str
+    name: str
+    mediaType: str
+    templateText: str
+    variables: List[str]
+    createdAt: str
+    updatedAt: str
+
+
+class CreateSystemPromptRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    mediaType: str = Field(..., pattern="^(text|image|video)$")
+    promptText: str = Field(..., min_length=1, max_length=10000)
+
+
+class UpdateSystemPromptRequest(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    promptText: Optional[str] = Field(None, min_length=1, max_length=10000)
+
+
+class SystemPromptResponse(BaseModel):
+    id: str
+    userId: str
+    name: str
+    mediaType: str
+    promptText: str
+    createdAt: str
+    updatedAt: str
+
+
+class TextGenerationRequest(BaseModel):
+    userMessage: str = Field(..., min_length=1, max_length=10000)
+    systemPrompt: Optional[str] = None
+    systemPromptId: Optional[str] = None
+    templateId: Optional[str] = None
+    variableValues: Optional[Dict[str, str]] = None
+    model: Optional[str] = Field(default="gemini-2.0-flash-exp")
+
+
+class TextGenerationResponse(BaseModel):
+    id: str
+    userId: str
+    mode: str
+    systemPrompt: Optional[str]
+    systemPromptId: Optional[str]
+    userMessage: str
+    templateId: Optional[str]
+    filledMessage: str
+    variableValues: Optional[Dict[str, str]]
+    modelResponse: str
+    model: str
+    ipAddress: Optional[str]
+    createdAt: str
+
+
+class CreateChatSessionRequest(BaseModel):
+    name: Optional[str] = None
+    systemPrompt: Optional[str] = None
+    systemPromptId: Optional[str] = None
+
+
+class UpdateChatSessionRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+
+
+class ChatSessionResponse(BaseModel):
+    id: str
+    userId: str
+    name: Optional[str]
+    systemPrompt: Optional[str]
+    systemPromptId: Optional[str]
+    createdAt: str
+    updatedAt: str
+
+
+class SendMessageRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=10000)
+    model: Optional[str] = Field(default="gemini-2.0-flash-exp")
+
+
+class ChatMessageResponse(BaseModel):
+    id: str
+    sessionId: str
+    role: str
+    content: str
+    createdAt: str
