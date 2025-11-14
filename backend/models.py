@@ -299,7 +299,8 @@ class CreateChatSessionRequest(BaseModel):
 
 
 class UpdateChatSessionRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200)
+    name: Optional[str] = Field(None, min_length=1, max_length=200)
+    system_prompt: Optional[str] = Field(None, alias="systemPrompt")
 
 
 class ChatSessionResponse(BaseModel):

@@ -167,13 +167,23 @@ async def update_chat_session(
     request_body: UpdateChatSessionRequest,
     auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
 ):
-    """Update a chat session (e.g., change name)."""
+    """Update a chat session (e.g., change name or system prompt)."""
     login_user, db_user = auth
+
+    # If updating system prompt, check if session has messages
+    if request_body.system_prompt is not None:
+        messages = ChatSessionManager.get_messages(session_id, db_user.id)
+        if len(messages) > 0:
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot update system prompt after messages have been sent"
+            )
 
     session = ChatSessionManager.update_session(
         session_id=session_id,
         user_id=db_user.id,
         name=request_body.name,
+        system_prompt=request_body.system_prompt,
     )
 
     if not session:

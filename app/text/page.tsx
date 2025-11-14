@@ -56,6 +56,13 @@ export default function TextGenerationPage() {
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [savingSystemPrompt, setSavingSystemPrompt] = useState(false);
 
+  // Session management state
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingSessionName, setEditingSessionName] = useState('');
+
+  // Compute if system prompt can be edited (no messages sent yet)
+  const canEditSystemPrompt = useMemo(() => messages.length === 0, [messages]);
+
   // Extract variables from user message
   const detectedVariables = useMemo(() => extractVariables(userMessage), [userMessage]);
 
@@ -271,6 +278,87 @@ export default function TextGenerationPage() {
       setMessages(prev => prev.filter(m => !m.id.startsWith('temp-')));
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Handle renaming session
+  const handleStartRename = (session: ChatSession) => {
+    setEditingSessionId(session.id);
+    setEditingSessionName(session.name || '');
+  };
+
+  const handleSaveRename = async (sessionId: string) => {
+    if (!editingSessionName.trim()) {
+      setError('Session name cannot be empty');
+      return;
+    }
+
+    try {
+      const updatedSession = await chatAPI.updateSession(sessionId, {
+        name: editingSessionName,
+      });
+
+      setChatSessions(prev =>
+        prev.map(s => (s.id === sessionId ? updatedSession : s))
+      );
+
+      if (currentSession?.id === sessionId) {
+        setCurrentSession(updatedSession);
+      }
+
+      setEditingSessionId(null);
+      setEditingSessionName('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rename session');
+    }
+  };
+
+  const handleCancelRename = () => {
+    setEditingSessionId(null);
+    setEditingSessionName('');
+  };
+
+  // Handle deleting session
+  const handleDeleteSession = async (sessionId: string) => {
+    if (!confirm('Are you sure you want to delete this chat session?')) {
+      return;
+    }
+
+    try {
+      await chatAPI.deleteSession(sessionId);
+
+      setChatSessions(prev => prev.filter(s => s.id !== sessionId));
+
+      if (currentSession?.id === sessionId) {
+        setCurrentSession(null);
+        setMessages([]);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete session');
+    }
+  };
+
+  // Handle updating chat session system prompt (only if no messages sent)
+  const handleUpdateChatSystemPrompt = async () => {
+    if (!currentSession) return;
+
+    if (messages.length > 0) {
+      setError('Cannot update system prompt after messages have been sent');
+      return;
+    }
+
+    try {
+      const updatedSession = await chatAPI.updateSession(currentSession.id, {
+        systemPrompt: systemPromptText || undefined,
+      });
+
+      setChatSessions(prev =>
+        prev.map(s => (s.id === currentSession.id ? updatedSession : s))
+      );
+
+      setCurrentSession(updatedSession);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update system prompt');
     }
   };
 
@@ -559,18 +647,63 @@ export default function TextGenerationPage() {
               ) : (
                 <div className="space-y-2 max-h-64 overflow-y-auto">
                   {chatSessions.map(session => (
-                    <button
+                    <div
                       key={session.id}
-                      type="button"
-                      onClick={() => setCurrentSession(session)}
-                      className={`w-full text-left px-3 py-2 rounded text-sm transition-colors ${
+                      className={`px-3 py-2 rounded text-sm transition-colors ${
                         currentSession?.id === session.id
                           ? 'bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-blue-100'
-                          : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                          : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300'
                       }`}
                     >
-                      {session.name || 'Untitled Chat'}
-                    </button>
+                      {editingSessionId === session.id ? (
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={editingSessionName}
+                            onChange={(e) => setEditingSessionName(e.target.value)}
+                            className="flex-1 text-sm"
+                            placeholder="Session name"
+                          />
+                          <button
+                            onClick={() => handleSaveRename(session.id)}
+                            className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs"
+                          >
+                            ✓
+                          </button>
+                          <button
+                            onClick={handleCancelRename}
+                            className="px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 text-xs"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setCurrentSession(session)}
+                            className="flex-1 text-left"
+                          >
+                            {session.name || 'Untitled Chat'}
+                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleStartRename(session)}
+                              className="p-1 text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                              title="Rename"
+                            >
+                              ✏️
+                            </button>
+                            <button
+                              onClick={() => handleDeleteSession(session.id)}
+                              className="p-1 text-gray-500 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                              title="Delete"
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
@@ -590,12 +723,28 @@ export default function TextGenerationPage() {
               onChange={(e) => setSystemPromptText(e.target.value)}
               placeholder="e.g., You are a helpful assistant that explains things simply"
               rows={3}
-              disabled={mode === 'chat' && currentSession !== null}
+              disabled={mode === 'chat' && currentSession !== null && !canEditSystemPrompt}
             />
             {mode === 'chat' && currentSession && (
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                System prompt is set at session creation and cannot be changed during the chat.
-              </p>
+              <>
+                {canEditSystemPrompt ? (
+                  <div className="mt-3">
+                    <Button 
+                      onClick={handleUpdateChatSystemPrompt}
+                      disabled={loading}
+                    >
+                      Update System Prompt
+                    </Button>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                      System prompt can be edited until the first message is sent.
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                    System prompt cannot be changed after messages have been sent.
+                  </p>
+                )}
+              </>
             )}
           </div>
 

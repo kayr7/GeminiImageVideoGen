@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.6.0] - 2025-11-14
+
+### Added
+- **Chat Session Management** 💬
+  - Ability to rename chat sessions (inline editing with ✏️ button)
+  - Delete button (🗑️) for chat sessions with confirmation
+  - Edit and delete buttons appear next to each session in the session list
+  - Files: `app/text/page.tsx`
+
+- **Editable System Prompts in Chat** ✏️
+  - System prompts can now be edited UNTIL the first message is sent
+  - "Update System Prompt" button appears when no messages exist
+  - System prompt textarea is enabled when no messages sent yet
+  - Clear UI feedback about when system prompt can/cannot be edited
+  - Backend validation to prevent system prompt changes after messages sent
+  - Files: `app/text/page.tsx`, `backend/routers/text_generation.py`, `backend/utils/chat_session_manager.py`
+
+### Changed
+- **Backend API Updates** 🔧
+  - `UpdateChatSessionRequest` now supports optional `name` and `systemPrompt` fields
+  - `ChatSessionManager.update_session()` now accepts `system_prompt` parameter
+  - Chat update endpoint validates that system prompt can only be updated if no messages exist
+  - Files: `backend/models.py`, `backend/utils/chat_session_manager.py`, `backend/routers/text_generation.py`, `types/text-generation.ts`
+
+### Technical Details
+- **Frontend State Management**:
+  - Added `editingSessionId` and `editingSessionName` states for rename functionality
+  - Added `canEditSystemPrompt` computed state (true when messages.length === 0)
+  - Added handlers: `handleStartRename`, `handleSaveRename`, `handleCancelRename`, `handleDeleteSession`, `handleUpdateSystemPrompt`
+- **Backend Logic**:
+  - Dynamic SQL update query generation based on which fields are being updated
+  - Server-side validation for system prompt updates (checks message count)
+  - Returns 400 error if attempting to update system prompt after messages sent
+
+---
+
 ## [3.5.1] - 2025-11-14
 
 ### Added

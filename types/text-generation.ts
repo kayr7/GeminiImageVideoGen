@@ -98,7 +98,8 @@ export interface CreateChatSessionRequest {
 }
 
 export interface UpdateChatSessionRequest {
-  name: string;
+  name?: string;
+  systemPrompt?: string;
 }
 
 export interface SendMessageRequest {

@@ -187,33 +187,38 @@ class ChatSessionManager:
         session_id: str,
         user_id: str,
         name: Optional[str] = None,
+        system_prompt: Optional[str] = None,
     ) -> Optional[ChatSession]:
-        """Update a chat session."""
+        """Update a chat session (name and/or system prompt)."""
         session = ChatSessionManager.get_session(session_id, user_id)
         if not session:
             return None
 
         now = datetime.utcnow().isoformat() + "Z"
 
+        # Build dynamic update query based on what's being updated
+        updates = []
+        params = []
+        
+        if name is not None:
+            updates.append("name = ?")
+            params.append(name)
+        
+        if system_prompt is not None:
+            updates.append("system_prompt = ?")
+            params.append(system_prompt)
+        
+        # Always update the timestamp
+        updates.append("updated_at = ?")
+        params.append(now)
+        
+        # Add WHERE clause parameters
+        params.extend([session_id, user_id])
+
         with get_connection() as conn:
-            if name is not None:
-                conn.execute(
-                    """
-                    UPDATE chat_sessions
-                    SET name = ?, updated_at = ?
-                    WHERE id = ? AND user_id = ?
-                    """,
-                    (name, now, session_id, user_id),
-                )
-            else:
-                conn.execute(
-                    """
-                    UPDATE chat_sessions
-                    SET updated_at = ?
-                    WHERE id = ? AND user_id = ?
-                    """,
-                    (now, session_id, user_id),
-                )
+            if updates:
+                query = f"UPDATE chat_sessions SET {', '.join(updates)} WHERE id = ? AND user_id = ?"
+                conn.execute(query, params)
             conn.commit()
 
         return ChatSessionManager.get_session(session_id, user_id)
