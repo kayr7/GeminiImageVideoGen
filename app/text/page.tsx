@@ -200,7 +200,7 @@ export default function TextGenerationPage() {
         systemPromptId: selectedSystemPrompt?.id,
         templateId: selectedTemplate?.id,
         variableValues: Object.keys(variableValues).length > 0 ? variableValues : undefined,
-        model: 'gemini-2.0-flash-exp',
+        model: 'gemini-2.5-flash',
       });
 
       setResponse(result.modelResponse);
@@ -253,7 +253,7 @@ export default function TextGenerationPage() {
 
       const message = await chatAPI.sendMessage(currentSession.id, {
         message: userMessage,
-        model: 'gemini-2.0-flash-exp',
+        model: 'gemini-2.5-flash',
       });
 
       // Replace temp message with real one and add model response

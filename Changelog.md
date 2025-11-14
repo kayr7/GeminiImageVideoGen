@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Files: `app/admin/page.tsx`
 
 ### Fixed
+- **Text Generation API Error** 🔧
+  - Fixed Pydantic validation error: "Extra inputs are not permitted" for model parameter
+  - Corrected API call to follow [Gemini API documentation](https://ai.google.dev/gemini-api/docs/text-generation#thinking_with_gemini_25)
+  - `model` parameter now passed directly to `generate_content()`, not in `GenerateContentConfig`
+  - `GenerateContentConfig` now only contains `system_instruction` (not model)
+  - **Updated default model**: Changed from `gemini-2.0-flash-exp` to `gemini-2.5-flash`
+  - Files: `backend/utils/text_generation_manager.py`, `backend/utils/chat_session_manager.py`, `app/text/page.tsx`
+
 - **Missing Text Quota for Existing Users** 🔧
   - **Frontend**: Existing users (created before text generation) now show editable interface instead of "No quota"
   - **Frontend**: Shows "Not set" with editable controls when quota is missing

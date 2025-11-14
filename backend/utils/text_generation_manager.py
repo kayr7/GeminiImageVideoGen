@@ -85,7 +85,7 @@ class TextGenerationManager:
         system_prompt_id: Optional[str] = None,
         template_id: Optional[str] = None,
         variable_values: Optional[Dict[str, str]] = None,
-        model: str = "gemini-2.0-flash-exp",
+        model: str = "gemini-2.5-flash",
         ip_address: Optional[str] = None,
     ) -> TextGeneration:
         """Generate text using Gemini API (single-turn)."""
@@ -100,14 +100,18 @@ class TextGenerationManager:
 
         # Generate content using new SDK
         client = get_client()
-        config_params = {"model": model}
+        
+        # Build config only if we have system instructions
+        config = None
         if system_prompt:
-            config_params["system_instruction"] = system_prompt
+            config = types.GenerateContentConfig(
+                system_instruction=system_prompt
+            )
         
         response = client.models.generate_content(
             model=model,
             contents=filled_message,
-            config=types.GenerateContentConfig(**config_params) if system_prompt else None
+            config=config
         )
         model_response = response.text
 

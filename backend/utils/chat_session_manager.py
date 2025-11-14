@@ -302,7 +302,7 @@ class ChatSessionManager:
         session_id: str,
         user_id: str,
         user_message: str,
-        model: str = "gemini-2.0-flash-exp",
+        model: str = "gemini-2.5-flash",
     ) -> ChatMessage:
         """Send a message and get a response from Gemini."""
         # Get session
@@ -333,14 +333,18 @@ class ChatSessionManager:
 
         # Generate response with history
         client = get_client()
-        config_params = {"model": model}
+        
+        # Build config only if we have system instructions
+        config = None
         if session.system_prompt:
-            config_params["system_instruction"] = session.system_prompt
+            config = types.GenerateContentConfig(
+                system_instruction=session.system_prompt
+            )
         
         response = client.models.generate_content(
             model=model,
             contents=contents,
-            config=types.GenerateContentConfig(**config_params) if session.system_prompt else None
+            config=config
         )
         model_response = response.text
 
