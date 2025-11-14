@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.5.1] - 2025-11-14
+
+### Added
+- **Text Quota Management in Admin Page** 📊
+  - Added "Text Quota" column to admin user management table
+  - Text quota input field in bulk user creation form (default: 200)
+  - Inline editing support for text generation quotas
+  - Full quota management for text/image/video in one place
+  - Files: `app/admin/page.tsx`
+
+---
+
 ## [3.5.0] - 2025-11-14
 
 ### Added

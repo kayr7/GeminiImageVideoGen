@@ -48,6 +48,7 @@ export default function AdminPage() {
   const [defaultQuotaType, setDefaultQuotaType] = useState<'limited' | 'unlimited'>('limited');
   const [imageQuotaLimit, setImageQuotaLimit] = useState('100');
   const [videoQuotaLimit, setVideoQuotaLimit] = useState('50');
+  const [textQuotaLimit, setTextQuotaLimit] = useState('200');
   const [bulkTags, setBulkTags] = useState('');
   const [bulkCreateLoading, setBulkCreateLoading] = useState(false);
 
@@ -156,9 +157,14 @@ export default function AdminPage() {
           type: defaultQuotaType,
           limit: parseInt(videoQuotaLimit) || 50,
         };
+        defaultQuotas.text = {
+          type: defaultQuotaType,
+          limit: parseInt(textQuotaLimit) || 200,
+        };
       } else {
         defaultQuotas.image = { type: 'unlimited', limit: null };
         defaultQuotas.video = { type: 'unlimited', limit: null };
+        defaultQuotas.text = { type: 'unlimited', limit: null };
       }
 
       // Parse tags
@@ -412,7 +418,7 @@ export default function AdminPage() {
               />
 
               {defaultQuotaType !== 'unlimited' && (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   <Input
                     label="Image Quota (includes image editing)"
                     type="number"
@@ -425,6 +431,13 @@ export default function AdminPage() {
                     type="number"
                     value={videoQuotaLimit}
                     onChange={(e) => setVideoQuotaLimit(e.target.value)}
+                    min="0"
+                  />
+                  <Input
+                    label="Text Quota"
+                    type="number"
+                    value={textQuotaLimit}
+                    onChange={(e) => setTextQuotaLimit(e.target.value)}
                     min="0"
                   />
                 </div>
@@ -516,6 +529,9 @@ export default function AdminPage() {
                       (includes editing)
                     </div>
                   </th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                    Text Quota
+                  </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                     Tags
                   </th>
@@ -528,6 +544,7 @@ export default function AdminPage() {
                 {users.map((usr) => {
                   const imageQuota = getQuotaByType(usr.quotas, 'image');
                   const videoQuota = getQuotaByType(usr.quotas, 'video');
+                  const textQuota = getQuotaByType(usr.quotas, 'text');
 
         return (
                     <tr
@@ -575,6 +592,11 @@ export default function AdminPage() {
                       {/* Video Quota */}
                       <td className="px-4 py-4">
                         {renderQuotaCell(usr.id, 'video', videoQuota)}
+                      </td>
+
+                      {/* Text Quota */}
+                      <td className="px-4 py-4">
+                        {renderQuotaCell(usr.id, 'text', textQuota)}
                       </td>
 
                       {/* Tags */}
