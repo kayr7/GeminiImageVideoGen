@@ -19,12 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Missing Text Quota for Existing Users** 🔧
-  - Existing users (created before text generation) now show editable interface instead of "No quota"
-  - Admins can create/set text quota for any user by changing the dropdown or limit
-  - Shows "Not set" with editable controls when quota is missing
-  - "✓ Create" button appears when changes are made to create the quota
+  - **Frontend**: Existing users (created before text generation) now show editable interface instead of "No quota"
+  - **Frontend**: Shows "Not set" with editable controls when quota is missing
+  - **Frontend**: "✓ Create" button appears when changes are made to create the quota
+  - **Backend**: Fixed quota update endpoint to accept "text" generation type (was only accepting "image", "video", "edit")
+  - **Backend**: Quota endpoint now creates new quotas if they don't exist (previously only updated existing ones)
+  - **Backend**: Reset endpoint now accepts "text" generation type
   - Default values: Text=200, Image=100, Video=50
-  - Files: `app/admin/page.tsx`
+  - Files: `app/admin/page.tsx`, `backend/routers/quotas.py`
 
 ---
 

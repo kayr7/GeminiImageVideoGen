@@ -63,15 +63,27 @@ async def update_user_quotas(
 
     # Update each quota
     for gen_type, quota_settings in request.quotas.items():
-        if gen_type not in ["image", "video", "edit"]:
+        if gen_type not in ["image", "video", "text"]:
             continue
 
-        QuotaManager.update_quota(
-            user_id,
-            gen_type,
-            quota_type=quota_settings.get("type"),
-            quota_limit=quota_settings.get("limit"),
-        )
+        # Check if quota exists, if not create it first
+        existing_quota = QuotaManager.get_quota(user_id, gen_type)
+        if not existing_quota:
+            # Create new quota with the specified settings
+            QuotaManager.create_quota(
+                user_id=user_id,
+                generation_type=gen_type,
+                quota_type=quota_settings.get("type", "limited"),
+                quota_limit=quota_settings.get("limit", 100),
+            )
+        else:
+            # Update existing quota
+            QuotaManager.update_quota(
+                user_id,
+                gen_type,
+                quota_type=quota_settings.get("type"),
+                quota_limit=quota_settings.get("limit"),
+            )
 
     # Get updated quotas
     quotas = QuotaManager.get_all_quotas(user_id)
@@ -98,7 +110,7 @@ async def reset_user_quotas(
             detail="You don't have permission to reset this user's quotas",
         )
 
-    if generation_type not in ["image", "video", "edit"]:
+    if generation_type not in ["image", "video", "text"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid generation type"
         )
