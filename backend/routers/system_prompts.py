@@ -8,10 +8,11 @@ from models import (
     UpdateSystemPromptRequest,
     SystemPromptResponse,
     SuccessResponse,
+    LoginUser,
 )
 from utils.auth import get_current_user_with_db
 from utils.system_prompt_manager import SystemPromptManager
-from utils.user_manager import User, LoginUser
+from utils.user_manager import User
 
 router = APIRouter()
 

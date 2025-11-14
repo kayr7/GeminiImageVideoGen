@@ -8,10 +8,11 @@ from models import (
     UpdateTemplateRequest,
     TemplateResponse,
     SuccessResponse,
+    LoginUser,
 )
 from utils.auth import get_current_user_with_db
 from utils.template_manager import TemplateManager
-from utils.user_manager import User, LoginUser
+from utils.user_manager import User
 
 router = APIRouter()
 

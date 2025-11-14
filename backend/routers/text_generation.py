@@ -12,11 +12,12 @@ from models import (
     SendMessageRequest,
     ChatMessageResponse,
     SuccessResponse,
+    LoginUser,
 )
 from utils.auth import get_current_user_with_db
 from utils.text_generation_manager import TextGenerationManager
 from utils.chat_session_manager import ChatSessionManager
-from utils.user_manager import User, LoginUser
+from utils.user_manager import User
 from utils.quota_manager import QuotaManager
 
 router = APIRouter()

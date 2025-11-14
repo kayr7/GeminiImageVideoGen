@@ -12,12 +12,13 @@ from google.genai import types
 
 from utils.database import get_connection
 
-# Configure Gemini API - create client
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable is required")
-
-client = genai.Client(api_key=GEMINI_API_KEY)
+# Configure Gemini API - lazy client initialization
+def get_client():
+    """Get or create the Gemini client."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise ValueError("GEMINI_API_KEY environment variable is required")
+    return genai.Client(api_key=api_key)
 
 
 class ChatMessage:
@@ -331,6 +332,7 @@ class ChatSessionManager:
         )
 
         # Generate response with history
+        client = get_client()
         config_params = {"model": model}
         if session.system_prompt:
             config_params["system_instruction"] = session.system_prompt
