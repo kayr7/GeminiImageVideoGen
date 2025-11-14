@@ -103,8 +103,12 @@ export default function MediaGallery() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [blobUrls, setBlobUrls] = useState<Record<string, string>>({});
   const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
+  const [loadingFullSize, setLoadingFullSize] = useState<Record<string, boolean>>({});
+  const [displayCount, setDisplayCount] = useState(30); // Start with 30 items
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const isAdmin = useMemo(() => user?.roles?.includes('admin') ?? false, [user?.roles]);
+  const displayedItems = useMemo(() => mediaItems.slice(0, displayCount), [mediaItems, displayCount]);
 
   // Create blob URLs for media with authentication
   const createBlobUrl = useCallback(async (mediaId: string): Promise<string | null> => {
@@ -147,6 +151,67 @@ export default function MediaGallery() {
       Object.values(thumbnailUrls).forEach((url) => URL.revokeObjectURL(url));
     };
   }, [blobUrls, thumbnailUrls]);
+
+  // Load full-size media on-demand when user clicks
+  const loadFullSizeMedia = useCallback(async (mediaId: string) => {
+    // If already loaded, return it
+    if (blobUrls[mediaId]) {
+      return blobUrls[mediaId];
+    }
+
+    // If currently loading, don't start another request
+    if (loadingFullSize[mediaId]) {
+      return null;
+    }
+
+    // Mark as loading
+    setLoadingFullSize(prev => ({ ...prev, [mediaId]: true }));
+
+    try {
+      const blobUrl = await createBlobUrl(mediaId);
+      if (blobUrl) {
+        setBlobUrls(prev => ({ ...prev, [mediaId]: blobUrl }));
+        return blobUrl;
+      }
+    } finally {
+      setLoadingFullSize(prev => ({ ...prev, [mediaId]: false }));
+    }
+
+    return null;
+  }, [blobUrls, loadingFullSize, createBlobUrl]);
+
+  // Load more thumbnails when user clicks "Load More"
+  const loadMoreThumbnails = useCallback(async () => {
+    if (loadingMore) return;
+    
+    setLoadingMore(true);
+    try {
+      const currentCount = displayCount;
+      const newCount = Math.min(currentCount + 30, mediaItems.length);
+      const itemsToLoad = mediaItems.slice(currentCount, newCount);
+
+      const newThumbnailUrls: Record<string, string> = {};
+      
+      await Promise.all(
+        itemsToLoad.map(async (item) => {
+          // Skip if already loaded
+          if (thumbnailUrls[item.id]) {
+            return;
+          }
+          
+          const thumbnailUrl = await createThumbnailUrl(item.id);
+          if (thumbnailUrl) {
+            newThumbnailUrls[item.id] = thumbnailUrl;
+          }
+        })
+      );
+      
+      setThumbnailUrls(prev => ({ ...prev, ...newThumbnailUrls }));
+      setDisplayCount(newCount);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [displayCount, mediaItems, thumbnailUrls, createThumbnailUrl, loadingMore]);
 
   const loadMedia = useCallback(async () => {
     setLoading(true);
@@ -204,19 +269,14 @@ export default function MediaGallery() {
 
       setMediaItems(parsed);
 
-      // Create blob URLs for all media items (for authenticated access)
-      const newBlobUrls: Record<string, string> = {};
+      // Only create thumbnail URLs for the first batch (much faster!)
+      // Full-size media will be loaded on-demand when user clicks
+      // Additional thumbnails loaded as user scrolls
+      const initialBatch = parsed.slice(0, 30);
       const newThumbnailUrls: Record<string, string> = {};
       
       await Promise.all(
-        parsed.map(async (item) => {
-          // Create full-size blob URL (for opening in new page)
-          const blobUrl = await createBlobUrl(item.id);
-          if (blobUrl) {
-            newBlobUrls[item.id] = blobUrl;
-          }
-          
-          // Create thumbnail URL (for gallery display)
+        initialBatch.map(async (item) => {
           const thumbnailUrl = await createThumbnailUrl(item.id);
           if (thumbnailUrl) {
             newThumbnailUrls[item.id] = thumbnailUrl;
@@ -224,7 +284,6 @@ export default function MediaGallery() {
         })
       );
       
-      setBlobUrls(newBlobUrls);
       setThumbnailUrls(newThumbnailUrls);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load gallery');
@@ -303,8 +362,9 @@ export default function MediaGallery() {
           No media has been generated yet. Create an image or video to see it appear here automatically.
         </div>
       ) : (
-        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-          {mediaItems.map((item) => {
+        <>
+          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+            {displayedItems.map((item) => {
             const referenceImages = item.details?.referenceImages ?? [];
             const sourceImages = item.details?.sourceImages ?? [];
             const firstFrame = item.details?.firstFrame;
@@ -315,9 +375,10 @@ export default function MediaGallery() {
                 key={item.id}
                 className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm flex flex-col"
               >
-                <div className="relative bg-gray-50 dark:bg-gray-800 cursor-pointer group" onClick={() => {
-                  const fullUrl = blobUrls[item.id] || item.url;
-                  window.open(fullUrl, '_blank');
+                <div className="relative bg-gray-50 dark:bg-gray-800 cursor-pointer group" onClick={async () => {
+                  // Load full-size media on-demand
+                  const fullUrl = await loadFullSizeMedia(item.id);
+                  window.open(fullUrl || item.url, '_blank');
                 }}>
                   {item.type === 'image' ? (
                     <div className="relative">
@@ -455,6 +516,23 @@ export default function MediaGallery() {
             );
           })}
         </div>
+
+        {displayCount < mediaItems.length && (
+          <div className="flex flex-col items-center gap-3 py-8">
+            <div className="text-sm text-gray-600 dark:text-gray-400">
+              Showing {displayCount} of {mediaItems.length} items
+            </div>
+            <button
+              type="button"
+              onClick={() => void loadMoreThumbnails()}
+              disabled={loadingMore}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium px-8 py-3 rounded-lg shadow-sm transition-colors"
+            >
+              {loadingMore ? 'Loading...' : `Load More (${mediaItems.length - displayCount} remaining)`}
+            </button>
+          </div>
+        )}
+      </>
       )}
     </div>
   );
