@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Full quota management for text/image/video in one place
   - Files: `app/admin/page.tsx`
 
+### Fixed
+- **Missing Text Quota for Existing Users** 🔧
+  - Existing users (created before text generation) now show editable interface instead of "No quota"
+  - Admins can create/set text quota for any user by changing the dropdown or limit
+  - Shows "Not set" with editable controls when quota is missing
+  - "✓ Create" button appears when changes are made to create the quota
+  - Default values: Text=200, Image=100, Video=50
+  - Files: `app/admin/page.tsx`
+
 ---
 
 ## [3.5.0] - 2025-11-14

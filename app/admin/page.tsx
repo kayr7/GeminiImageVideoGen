@@ -633,13 +633,64 @@ export default function AdminPage() {
   );
 
   function renderQuotaCell(userId: string, type: string, quota: Quota | null) {
+    // Handle missing quota - allow creating a new one
+    const editData = editingQuotas[userId]?.[type];
+    
     if (!quota) {
+      const currentType = editData?.type ?? 'limited';
+      const currentLimit = editData?.limit ?? (type === 'text' ? 200 : type === 'image' ? 100 : 50);
+      const hasChanges = editData?.hasChanges ?? false;
+      const isUnlimited = currentType === 'unlimited';
+
       return (
-        <div className="text-center text-xs text-gray-400 dark:text-gray-500">No quota</div>
+        <div className="flex flex-col items-center gap-1.5 py-1">
+          {/* No quota yet - show creation interface */}
+          <div className="text-xs text-gray-400 dark:text-gray-500 mb-1">Not set</div>
+          
+          <select
+            aria-label={`${type} quota type`}
+            className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 w-24 hover:border-blue-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            value={currentType}
+            onChange={(e) => updateQuotaValue(userId, type, 'type', e.target.value, null)}
+          >
+            <option value="limited">Limited</option>
+            <option value="unlimited">Unlimited</option>
+          </select>
+
+          {currentType !== 'unlimited' && (
+            <input
+              type="number"
+              aria-label={`${type} quota limit`}
+              className="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 w-20 text-center hover:border-blue-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              value={currentLimit}
+              onChange={(e) => updateQuotaValue(userId, type, 'limit', e.target.value === '' ? 0 : parseInt(e.target.value), null)}
+              min="0"
+            />
+          )}
+
+          {/* Save button - always show for missing quotas once user makes changes */}
+          {hasChanges && (
+            <div className="flex gap-1">
+              <button
+                onClick={() => handleSaveQuota(userId, type)}
+                className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                title="Create quota"
+              >
+                ✓ Create
+              </button>
+              <button
+                onClick={() => cancelQuotaEdit(userId, type)}
+                className="px-2 py-1 text-xs bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors"
+                title="Cancel"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+        </div>
       );
     }
 
-    const editData = editingQuotas[userId]?.[type];
     const currentType = editData?.type ?? quota.quotaType;
     const currentLimit = editData?.limit ?? quota.quotaLimit;
     const hasChanges = editData?.hasChanges ?? false;
