@@ -7,14 +7,17 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from utils.database import get_connection
 
-# Configure Gemini API
+# Configure Gemini API - create client
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY environment variable is required")
+
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 class ChatMessage:
@@ -309,27 +312,34 @@ class ChatSessionManager:
         # Get chat history
         messages = ChatSessionManager.get_messages(session_id, user_id)
 
-        # Create Gemini model with system instruction
-        gemini_model = genai.GenerativeModel(
-            model_name=model,
-            system_instruction=session.system_prompt if session.system_prompt else None,
+        # Build conversation history
+        contents = []
+        for msg in messages:
+            contents.append(
+                types.Content(
+                    role="user" if msg.role == "user" else "model",
+                    parts=[types.Part(text=msg.content)]
+                )
+            )
+        
+        # Add current user message
+        contents.append(
+            types.Content(
+                role="user",
+                parts=[types.Part(text=user_message)]
+            )
         )
 
-        # Build conversation history for Gemini
-        history = []
-        for msg in messages:
-            history.append(
-                {
-                    "role": msg.role,
-                    "parts": [msg.content],
-                }
-            )
-
-        # Start chat with history
-        chat = gemini_model.start_chat(history=history)
-
-        # Send message and get response
-        response = chat.send_message(user_message)
+        # Generate response with history
+        config_params = {"model": model}
+        if session.system_prompt:
+            config_params["system_instruction"] = session.system_prompt
+        
+        response = client.models.generate_content(
+            model=model,
+            contents=contents,
+            config=types.GenerateContentConfig(**config_params) if session.system_prompt else None
+        )
         model_response = response.text
 
         # Save user message

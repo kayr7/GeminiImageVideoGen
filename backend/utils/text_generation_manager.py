@@ -8,14 +8,17 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from utils.database import get_connection
 
-# Configure Gemini API
+# Configure Gemini API - create client
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY environment variable is required")
+
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 class TextGeneration:
@@ -94,14 +97,16 @@ class TextGenerationManager:
             for key, value in variable_values.items():
                 filled_message = filled_message.replace(f"{{{{{key}}}}}", value)
 
-        # Create Gemini model
-        gemini_model = genai.GenerativeModel(
-            model_name=model,
-            system_instruction=system_prompt if system_prompt else None,
+        # Generate content using new SDK
+        config_params = {"model": model}
+        if system_prompt:
+            config_params["system_instruction"] = system_prompt
+        
+        response = client.models.generate_content(
+            model=model,
+            contents=filled_message,
+            config=types.GenerateContentConfig(**config_params) if system_prompt else None
         )
-
-        # Generate content
-        response = gemini_model.generate_content(filled_message)
         model_response = response.text
 
         # Save to database
