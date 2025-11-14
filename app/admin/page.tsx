@@ -319,10 +319,11 @@ export default function AdminPage() {
     }
   };
 
-  const updateQuotaValue = (userId: string, generationType: string, field: 'type' | 'limit', value: any, originalQuota: Quota) => {
+  const updateQuotaValue = (userId: string, generationType: string, field: 'type' | 'limit', value: any, originalQuota: Quota | null) => {
+    const defaultLimit = generationType === 'text' ? 200 : generationType === 'image' ? 100 : 50;
     const currentEdit = editingQuotas[userId]?.[generationType] || {
-      type: originalQuota.quotaType,
-      limit: originalQuota.quotaLimit,
+      type: originalQuota?.quotaType ?? 'limited',
+      limit: originalQuota?.quotaLimit ?? defaultLimit,
       hasChanges: false,
     };
 
@@ -640,7 +641,6 @@ export default function AdminPage() {
       const currentType = editData?.type ?? 'limited';
       const currentLimit = editData?.limit ?? (type === 'text' ? 200 : type === 'image' ? 100 : 50);
       const hasChanges = editData?.hasChanges ?? false;
-      const isUnlimited = currentType === 'unlimited';
 
       return (
         <div className="flex flex-col items-center gap-1.5 py-1">
