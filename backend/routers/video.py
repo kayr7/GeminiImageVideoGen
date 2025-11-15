@@ -26,6 +26,7 @@ from utils.rate_limiter import check_rate_limit
 from utils.auth import get_current_user_with_db
 from utils.user_manager import User
 from utils.quota_manager import QuotaManager
+from utils.video_frame_extractor import extract_frames
 
 router = APIRouter()
 
@@ -463,6 +464,20 @@ async def check_video_status(
         # Convert to base64
         video_base64 = base64.b64encode(video_bytes).decode("utf-8")
 
+        # Extract first and last frames from video
+        print("Extracting first and last frames from video...")
+        first_frame_base64, last_frame_base64 = extract_frames(video_bytes)
+        
+        if first_frame_base64:
+            print(f"Successfully extracted first frame ({len(first_frame_base64)} bytes)")
+        else:
+            print("Warning: Could not extract first frame")
+            
+        if last_frame_base64:
+            print(f"Successfully extracted last frame ({len(last_frame_base64)} bytes)")
+        else:
+            print("Warning: Could not extract last frame")
+
         # Save to storage with metadata from the original request
         storage = get_media_storage()
         job_data = queue.get_job(jobId)
@@ -515,6 +530,8 @@ async def check_video_status(
                 "videoUrl": f"data:video/mp4;base64,{video_base64}",
                 "videoData": video_base64,
                 "mediaId": media_id,
+                "firstFrameData": first_frame_base64,
+                "lastFrameData": last_frame_base64,
             },
         )
 
@@ -527,6 +544,8 @@ async def check_video_status(
                 "videoUrl": f"data:video/mp4;base64,{video_base64}",
                 "videoData": video_base64,
                 "mediaId": media_id,
+                "firstFrameData": first_frame_base64,
+                "lastFrameData": last_frame_base64,
                 "message": "Video generation completed successfully!",
             },
         )

@@ -60,11 +60,13 @@ export default function VideoGenerator() {
   const [model, setModel] = useState('');
 
   // Three distinct image types per Veo documentation
-  const [firstFrame, setFirstFrame] = useState<string | null>(null); // Starting frame
-  const [lastFrame, setLastFrame] = useState<string | null>(null); // Ending frame
+  const [firstFrameInput, setFirstFrameInput] = useState<string | null>(null); // Starting frame (input)
+  const [lastFrameInput, setLastFrameInput] = useState<string | null>(null); // Ending frame (input)
   const [referenceImages, setReferenceImages] = useState<string[]>([]); // Style/content guidance (max 3)
 
   const [generatedVideo, setGeneratedVideo] = useState<string | null>(null);
+  const [firstFrameExtracted, setFirstFrameExtracted] = useState<string | null>(null); // Extracted from generated video
+  const [lastFrameExtracted, setLastFrameExtracted] = useState<string | null>(null); // Extracted from generated video
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -173,11 +175,29 @@ export default function VideoGenerator() {
           if (data.data.videoUrl) {
             setGeneratedVideo(resolveApiUrl(data.data.videoUrl));
             setStatusMessage('Video generation completed!');
+            
+            // Set extracted frames if available
+            if (data.data.firstFrameData) {
+              setFirstFrameExtracted(`data:image/jpeg;base64,${data.data.firstFrameData}`);
+            }
+            if (data.data.lastFrameData) {
+              setLastFrameExtracted(`data:image/jpeg;base64,${data.data.lastFrameData}`);
+            }
+            
             return;
           }
           if (data.data.videoData) {
             setGeneratedVideo(`data:video/mp4;base64,${data.data.videoData}`);
             setStatusMessage('Video generation completed!');
+            
+            // Set extracted frames if available
+            if (data.data.firstFrameData) {
+              setFirstFrameExtracted(`data:image/jpeg;base64,${data.data.firstFrameData}`);
+            }
+            if (data.data.lastFrameData) {
+              setLastFrameExtracted(`data:image/jpeg;base64,${data.data.lastFrameData}`);
+            }
+            
             return;
           }
         } else if (data.data.status === 'processing') {
@@ -209,6 +229,8 @@ export default function VideoGenerator() {
     setLoading(true);
     setError(null);
     setGeneratedVideo(null);
+    setFirstFrameExtracted(null);
+    setLastFrameExtracted(null);
     setStatusMessage('Starting video generation...');
 
     try {
@@ -223,12 +245,12 @@ export default function VideoGenerator() {
         requestBody.negativePrompt = negativePrompt.trim();
       }
       
-      if (firstFrame) {
-        requestBody.firstFrame = firstFrame;
+      if (firstFrameInput) {
+        requestBody.firstFrame = firstFrameInput;
       }
       
-      if (lastFrame) {
-        requestBody.lastFrame = lastFrame;
+      if (lastFrameInput) {
+        requestBody.lastFrame = lastFrameInput;
       }
       
       if (referenceImages.length > 0) {
@@ -387,14 +409,14 @@ export default function VideoGenerator() {
                 <FileUpload
                   label="First Frame (Optional) - Image becomes the starting frame"
                   accept="image/*"
-                  onFileSelect={(file, base64) => setFirstFrame(base64 || null)}
+                  onFileSelect={(file, base64) => setFirstFrameInput(base64 || null)}
                   preview
                 />
 
                 <FileUpload
                   label="Last Frame (Optional) - Image becomes the ending frame"
                   accept="image/*"
-                  onFileSelect={(file, base64) => setLastFrame(base64 || null)}
+                  onFileSelect={(file, base64) => setLastFrameInput(base64 || null)}
                   preview
                 />
 
@@ -628,6 +650,64 @@ export default function VideoGenerator() {
                   >
                     Download Video
                   </Button>
+                  
+                  {/* Extracted Frames Section */}
+                  {(firstFrameExtracted || lastFrameExtracted) && (
+                    <div className="mt-6 p-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg">
+                      <h4 className="text-sm font-semibold mb-3">Extracted Frames</h4>
+                      <div className="grid grid-cols-2 gap-4">
+                        {firstFrameExtracted && (
+                          <div className="space-y-2">
+                            <p className="text-xs font-medium text-gray-600 dark:text-gray-400">First Frame</p>
+                            <img
+                              src={firstFrameExtracted}
+                              alt="First frame"
+                              className="w-full rounded border border-gray-300 dark:border-gray-600"
+                            />
+                            <Button
+                              variant="secondary"
+                              onClick={() => {
+                                const link = document.createElement('a');
+                                link.href = firstFrameExtracted;
+                                link.download = `first-frame-${Date.now()}.jpg`;
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                              }}
+                              className="w-full text-xs"
+                            >
+                              Download First Frame
+                            </Button>
+                          </div>
+                        )}
+                        
+                        {lastFrameExtracted && (
+                          <div className="space-y-2">
+                            <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Last Frame</p>
+                            <img
+                              src={lastFrameExtracted}
+                              alt="Last frame"
+                              className="w-full rounded border border-gray-300 dark:border-gray-600"
+                            />
+                            <Button
+                              variant="secondary"
+                              onClick={() => {
+                                const link = document.createElement('a');
+                                link.href = lastFrameExtracted;
+                                link.download = `last-frame-${Date.now()}.jpg`;
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                              }}
+                              className="w-full text-xs"
+                            >
+                              Download Last Frame
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="text-gray-500">Your generated video will appear here</p>

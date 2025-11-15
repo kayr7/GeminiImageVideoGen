@@ -61,6 +61,8 @@ class VideoResponse(BaseModel):
     estimatedCompletion: Optional[datetime] = None
     mediaId: Optional[str] = None
     error: Optional[str] = None
+    firstFrameData: Optional[str] = None  # Base64 encoded first frame image
+    lastFrameData: Optional[str] = None  # Base64 encoded last frame image
 
 
 # Music Generation Models
