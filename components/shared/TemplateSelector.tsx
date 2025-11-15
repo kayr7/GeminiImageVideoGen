@@ -1,13 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { templateAPI } from '@/lib/templates/api';
 import { extractVariables, fillTemplate } from '@/lib/templates/utils';
 import type { PromptTemplate, CreateTemplateRequest, UpdateTemplateRequest } from '@/types/text-generation';
 import Button from '../ui/Button';
 import Select from '../ui/Select';
 import Input from '../ui/Input';
-import Textarea from '../ui/Textarea';
 
 interface TemplateSelectorProps {
   mediaType: 'text' | 'image' | 'video';
@@ -35,18 +34,18 @@ export default function TemplateSelector({
   const [error, setError] = useState<string | null>(null);
 
   // Load templates
-  useEffect(() => {
-    loadTemplates();
-  }, [mediaType]);
-
-  const loadTemplates = async () => {
+  const loadTemplates = useCallback(async () => {
     try {
       const loaded = await templateAPI.list(mediaType);
       setTemplates(loaded);
     } catch (err) {
       console.error('Failed to load templates:', err);
     }
-  };
+  }, [mediaType]);
+
+  useEffect(() => {
+    loadTemplates();
+  }, [loadTemplates]);
 
   // Update selected template when selection changes
   useEffect(() => {
@@ -75,7 +74,7 @@ export default function TemplateSelector({
       const filled = fillTemplate(selectedTemplate.templateText, variableValues);
       onChange(filled);
     }
-  }, [selectedTemplate, variableValues]);
+  }, [selectedTemplate, variableValues, onChange]);
 
   const handleVariableChange = (variable: string, newValue: string) => {
     setVariableValues((prev) => ({
