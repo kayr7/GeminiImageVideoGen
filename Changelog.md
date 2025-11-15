@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.8.0] - 2025-11-15
+
+### Added
+- **Template System for Image & Video Generation** 📝
+  - Extended template functionality to image and video generators
+  - Reusable prompt templates with `{{variable}}` syntax
+  - Template selector UI in both ImageGenerator and VideoGenerator
+  - Dynamic variable input fields auto-generated from templates
+  - Save new templates directly from image/video generation pages
+  - Update existing templates with current prompt
+  - Templates filtered by media type (image, video, text)
+  - Seamless integration with existing text generation templates
+  - Files: `lib/templates/api.ts`, `lib/templates/utils.ts`, `components/shared/TemplateSelector.tsx`
+
+- **Shared Template Components** 🔄
+  - Created reusable `TemplateSelector` component
+  - Moved template utilities to shared location (`lib/templates/`)
+  - Unified template management across all media types
+  - Modal dialogs for save/update operations
+  - Files: `components/shared/TemplateSelector.tsx`, `lib/templates/utils.ts`, `lib/templates/api.ts`
+
+### Changed
+- **Image Generation** 🖼️
+  - Added template selector above prompt textarea
+  - Templates auto-fill prompt with variable substitution
+  - Save current prompts as templates for reuse
+  - Files: `components/generators/ImageGenerator.tsx`
+
+- **Video Generation** 🎬
+  - Added template selector above video description textarea
+  - Templates auto-fill video prompts with variable substitution
+  - Save video prompts as templates for future use
+  - Files: `components/generators/VideoGenerator.tsx`
+
+### Technical Details
+- **Template Architecture**:
+  - Templates support three media types: 'text', 'image', 'video'
+  - Variable extraction using regex: `/\{\{(\w+)\}\}/g`
+  - Real-time variable filling as user types
+  - Template API already supports media type filtering
+  - No backend changes required (already media-agnostic)
+
+- **UI Components**:
+  - TemplateSelector: 360+ lines of React/TypeScript
+  - Automatic variable detection and input generation
+  - Inline save/update modals
+  - Template clearing functionality
+  - Disabled state support during loading
+
+- **Developer Experience**:
+  - Single reusable component for all generators
+  - Consistent UX across text, image, and video
+  - Type-safe with TypeScript
+  - Full error handling
+
+### Use Cases
+- **Image Templates**: Reusable style descriptions, composition patterns
+- **Video Templates**: Camera movement descriptions, scene types
+- **Consistency**: Maintain consistent prompts across multiple generations
+- **Productivity**: Save complex prompts for repeated use
+- **Collaboration**: Share template libraries with team members
+
+---
+
 ## [3.7.0] - 2025-11-15
 
 ### Added

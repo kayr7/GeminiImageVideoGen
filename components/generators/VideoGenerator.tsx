@@ -10,6 +10,7 @@ import MultiFileUpload from '../ui/MultiFileUpload';
 import FileUpload from '../ui/FileUpload';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import QuotaDisplay from './QuotaDisplay';
+import TemplateSelector from '../shared/TemplateSelector';
 import { CONSTANTS } from '@/lib/utils/constants';
 import { useAuth } from '@/lib/context/AuthContext';
 import { apiFetch, resolveApiUrl } from '@/lib/utils/apiClient';
@@ -365,6 +366,15 @@ export default function VideoGenerator() {
           {token && <QuotaDisplay generationType="video" />}
           
           <h2 className="text-2xl font-bold mb-4">Video Generation with Veo 3.1</h2>
+
+          {/* Template Selector */}
+          <TemplateSelector
+            mediaType="video"
+            value={prompt}
+            onChange={setPrompt}
+            disabled={loading}
+            label="Prompt Template (Optional)"
+          />
 
           <Textarea
             label="Video Description"
