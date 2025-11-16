@@ -129,8 +129,8 @@ async def generate_video(
         model_name = model_info["id"]
 
         # Check if advanced features are supported by this model
-        # Reference images are only supported by veo-3.1-generate-preview (not fast variant)
-        supports_reference_images = "fast" not in model_name.lower()
+        # Reference images, first/last frames are only supported by non-fast variants
+        supports_advanced_frames = "fast" not in model_name.lower()
 
         # Build config for advanced options
         config_kwargs = {}
@@ -139,8 +139,16 @@ async def generate_video(
         if req.negativePrompt:
             config_kwargs["negativePrompt"] = req.negativePrompt
 
+        supports_reference_images = supports_advanced_frames
+
         # Add last frame if provided (ending frame) - goes in config
         if req.lastFrame:
+            if not supports_advanced_frames:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Last frame is not supported by {model_name}. "
+                    "Please use 'veo-3.1-generate-preview' (standard, not fast) for last frame support.",
+                )
             image_bytes, mime_type = extract_base64_bytes(req.lastFrame)
             config_kwargs["lastFrame"] = create_image_from_bytes(image_bytes, mime_type)
 
@@ -176,6 +184,12 @@ async def generate_video(
 
         # Add first frame if provided (starting frame) - goes as 'image' parameter
         if req.firstFrame:
+            if not supports_advanced_frames:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"First frame is not supported by {model_name}. "
+                    "Please use 'veo-3.1-generate-preview' (standard, not fast) for first frame support.",
+                )
             image_bytes, mime_type = extract_base64_bytes(req.firstFrame)
             kwargs["image"] = create_image_from_bytes(image_bytes, mime_type)
 
@@ -467,12 +481,14 @@ async def check_video_status(
         # Extract first and last frames from video
         print("Extracting first and last frames from video...")
         first_frame_base64, last_frame_base64 = extract_frames(video_bytes)
-        
+
         if first_frame_base64:
-            print(f"Successfully extracted first frame ({len(first_frame_base64)} bytes)")
+            print(
+                f"Successfully extracted first frame ({len(first_frame_base64)} bytes)"
+            )
         else:
             print("Warning: Could not extract first frame")
-            
+
         if last_frame_base64:
             print(f"Successfully extracted last frame ({len(last_frame_base64)} bytes)")
         else:

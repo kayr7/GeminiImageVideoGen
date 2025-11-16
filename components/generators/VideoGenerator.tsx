@@ -103,7 +103,21 @@ export default function VideoGenerator() {
     [availableVideoModels, model]
   );
 
+  const supportsAdvancedFrames = useMemo(() => {
+    if (!model) {
+      return true;
+    }
+    return !model.toLowerCase().includes('fast');
+  }, [model]);
+
   const videoGenerationEnabled = config ? config.features.videoGeneration : true;
+
+  useEffect(() => {
+    if (!supportsAdvancedFrames) {
+      setFirstFrameInput(null);
+      setLastFrameInput(null);
+    }
+  }, [supportsAdvancedFrames]);
 
   const loadJobHistory = useCallback(async () => {
     if (!token) {
@@ -416,11 +430,24 @@ export default function VideoGenerator() {
                   </ul>
                 </div>
 
+                {!supportsAdvancedFrames && (
+                  <div className="p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-800 dark:text-amber-200">
+                    ⚠️ First/Last frames are only supported by standard Veo models (e.g. <strong>veo-3.1-generate-preview</strong>).
+                    Switch models to use these features.
+                  </div>
+                )}
+
                 <FileUpload
                   label="First Frame (Optional) - Image becomes the starting frame"
                   accept="image/*"
                   onFileSelect={(file, base64) => setFirstFrameInput(base64 || null)}
                   preview
+                  disabled={!supportsAdvancedFrames}
+                  helperText={
+                    !supportsAdvancedFrames
+                      ? 'First frame is only available on standard Veo models (not fast variants)'
+                      : undefined
+                  }
                 />
 
                 <FileUpload
@@ -428,6 +455,12 @@ export default function VideoGenerator() {
                   accept="image/*"
                   onFileSelect={(file, base64) => setLastFrameInput(base64 || null)}
                   preview
+                  disabled={!supportsAdvancedFrames}
+                  helperText={
+                    !supportsAdvancedFrames
+                      ? 'Last frame is only available on standard Veo models (not fast variants)'
+                      : undefined
+                  }
                 />
 
                 <div>
