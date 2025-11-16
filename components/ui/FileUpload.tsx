@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, ChangeEvent, DragEvent } from 'react';
+import { useState, useRef, ChangeEvent, DragEvent, useEffect } from 'react';
 
 interface FileUploadProps {
   accept?: string;
@@ -9,6 +9,8 @@ interface FileUploadProps {
   preview?: boolean;
   label?: string;
   error?: string;
+  helperText?: string;
+  disabled?: boolean;
 }
 
 export default function FileUpload({
@@ -18,11 +20,24 @@ export default function FileUpload({
   preview = true,
   label,
   error,
+  helperText,
+  disabled = false,
 }: FileUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (disabled) {
+      setPreviewUrl(null);
+      setFileName(null);
+      if (inputRef.current) {
+        inputRef.current.value = '';
+      }
+      onFileSelect(null);
+    }
+  }, [disabled, onFileSelect]);
 
   const handleFile = async (file: File | null) => {
     if (!file) {
@@ -65,6 +80,7 @@ export default function FileUpload({
   };
 
   const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    if (disabled) return;
     e.preventDefault();
     setIsDragging(true);
   };
@@ -74,6 +90,7 @@ export default function FileUpload({
   };
 
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    if (disabled) return;
     e.preventDefault();
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0] || null;
@@ -100,18 +117,20 @@ export default function FileUpload({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         className={`
-          border-2 border-dashed rounded-lg p-6 text-center cursor-pointer
+          border-2 border-dashed rounded-lg p-6 text-center ${disabled ? 'cursor-not-allowed bg-gray-50 dark:bg-gray-900' : 'cursor-pointer'}
           transition-colors duration-200
-          ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400'}
+          ${isDragging && !disabled ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-blue-400'}
           ${error ? 'border-red-500' : ''}
         `}
-        onClick={() => inputRef.current?.click()}
+        onClick={() => !disabled && inputRef.current?.click()}
+        aria-disabled={disabled}
       >
         <input
           ref={inputRef}
           type="file"
           accept={accept}
           onChange={handleChange}
+          disabled={disabled}
           className="hidden"
         />
 
@@ -152,7 +171,7 @@ export default function FileUpload({
               />
             </svg>
             <p className="mt-2 text-sm text-gray-600">
-              Drag and drop a file here, or click to select
+              {disabled ? 'File upload disabled for this model' : 'Drag and drop a file here, or click to select'}
             </p>
             <p className="mt-1 text-xs text-gray-500">
               Max size: {(maxSize / 1024 / 1024).toFixed(0)}MB
@@ -160,6 +179,10 @@ export default function FileUpload({
           </>
         )}
       </div>
+
+      {helperText && (
+        <p className="mt-1 text-xs text-gray-500">{helperText}</p>
+      )}
 
       {error && (
         <p className="mt-1 text-sm text-red-600">{error}</p>
