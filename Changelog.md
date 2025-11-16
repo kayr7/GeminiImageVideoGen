@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.8.1] - 2025-11-16
+
+### Fixed
+- **Video Generation API Parameters** 🔧
+  - Fixed snake_case parameter names for Veo API (`negative_prompt`, `last_frame`, `reference_images`)
+  - Added support for reference images (up to 3) with proper `reference_type="asset"` configuration
+  - Implemented validation to prevent combining last frame with reference images (API limitation)
+  - First frame can now be used with reference images (valid combination)
+  - Added clear error messages for incompatible parameter combinations
+  - Files: `backend/routers/video.py`
+
+### Changed
+- **Video Generator UI** 🎬
+  - Restored reference images UI with proper conflict detection
+  - Added visual warnings when last frame and reference images are both selected
+  - Disabled last frame input when reference images are present (and vice versa)
+  - First frame can now be used with reference images (valid combination)
+  - Updated helper text to clarify usage patterns
+  - Updated tips section to reflect API limitations
+  - Files: `components/generators/VideoGenerator.tsx`
+
+### Technical Details
+- **Veo 3.1 API Limitations**:
+  - Cannot combine `last_frame` with `config.reference_images`
+  - Three valid patterns:
+    1. **Frame Interpolation**: `image` (first frame) + `config.last_frame`
+    2. **Style-Guided from Start**: `image` (first frame) + `config.reference_images`
+    3. **Style Guidance Only**: `config.reference_images` (up to 3 images with `reference_type="asset"`)
+  - Reference images only supported on standard Veo models (not fast variants)
+  - Documentation: https://ai.google.dev/gemini-api/docs/video
+
+---
+
 ## [3.8.0] - 2025-11-15
 
 ### Added

@@ -6,8 +6,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Button from '../ui/Button';
 import Textarea from '../ui/Textarea';
 import Select from '../ui/Select';
-import MultiFileUpload from '../ui/MultiFileUpload';
 import FileUpload from '../ui/FileUpload';
+import MultiFileUpload from '../ui/MultiFileUpload';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import QuotaDisplay from './QuotaDisplay';
 import TemplateSelector from '../shared/TemplateSelector';
@@ -60,7 +60,9 @@ export default function VideoGenerator() {
   const [negativePrompt, setNegativePrompt] = useState('');
   const [model, setModel] = useState('');
 
-  // Three distinct image types per Veo documentation
+  // Image options per Veo documentation
+  // NOTE: Cannot combine last frame with reference images (API limitation)
+  // Valid: first+last frames OR first frame+reference images OR reference images only
   const [firstFrameInput, setFirstFrameInput] = useState<string | null>(null); // Starting frame (input)
   const [lastFrameInput, setLastFrameInput] = useState<string | null>(null); // Ending frame (input)
   const [referenceImages, setReferenceImages] = useState<string[]>([]); // Style/content guidance (max 3)
@@ -428,12 +430,22 @@ export default function VideoGenerator() {
                     <li>• <strong>Last Frame:</strong> Image becomes the ending frame of the video</li>
                     <li>• <strong>Reference Images:</strong> Up to 3 images guide the visual style/content (not used as frames)</li>
                   </ul>
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 font-semibold">
+                    ⚠️ Cannot combine last frame with reference images
+                  </p>
                 </div>
 
                 {!supportsAdvancedFrames && (
                   <div className="p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-800 dark:text-amber-200">
-                    ⚠️ First/Last frames are only supported by standard Veo models (e.g. <strong>veo-3.1-generate-preview</strong>).
+                    ⚠️ Advanced image features are only supported by standard Veo models (e.g. <strong>veo-3.1-generate-preview</strong>).
                     Switch models to use these features.
+                  </div>
+                )}
+
+                {lastFrameInput && referenceImages.length > 0 && (
+                  <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-xs text-red-800 dark:text-red-200">
+                    <strong>⚠️ Conflict:</strong> You cannot use last frame and reference images together.
+                    Please remove one or the other before generating.
                   </div>
                 )}
 
@@ -446,7 +458,7 @@ export default function VideoGenerator() {
                   helperText={
                     !supportsAdvancedFrames
                       ? 'First frame is only available on standard Veo models (not fast variants)'
-                      : undefined
+                      : 'Can be used with last frame OR reference images'
                   }
                 />
 
@@ -455,11 +467,13 @@ export default function VideoGenerator() {
                   accept="image/*"
                   onFileSelect={(file, base64) => setLastFrameInput(base64 || null)}
                   preview
-                  disabled={!supportsAdvancedFrames}
+                  disabled={!supportsAdvancedFrames || referenceImages.length > 0}
                   helperText={
                     !supportsAdvancedFrames
                       ? 'Last frame is only available on standard Veo models (not fast variants)'
-                      : undefined
+                      : referenceImages.length > 0
+                      ? 'Disabled: Cannot use with reference images'
+                      : 'Works best with first frame for interpolation'
                   }
                 />
 
@@ -470,14 +484,15 @@ export default function VideoGenerator() {
                     maxFiles={3}
                     onFilesSelect={(files, base64Array) => setReferenceImages(base64Array)}
                     preview
-                    helperText="Up to 3 images to guide the visual style and content (not used as frames)"
+                    disabled={!supportsAdvancedFrames || !!lastFrameInput}
+                    helperText={
+                      !supportsAdvancedFrames
+                        ? 'Reference images are only available on standard Veo models (not fast variants)'
+                        : lastFrameInput
+                        ? 'Disabled: Cannot use with last frame'
+                        : 'Up to 3 images to guide visual style and content (not used as frames)'
+                    }
                   />
-                  {referenceImages.length > 0 && model.includes('fast') && (
-                    <div className="mt-2 p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded text-xs text-yellow-800 dark:text-yellow-200">
-                      ⚠️ Reference images are only supported by <strong>veo-3.1-generate-preview</strong> (standard model).
-                      Please switch to the standard model or remove reference images.
-                    </div>
-                  )}
                 </div>
 
                 <Textarea
@@ -579,8 +594,7 @@ export default function VideoGenerator() {
               <li>• All videos are 8 seconds at 720p/1080p (24fps)</li>
               <li>• Be descriptive about motion, camera movement, and lighting</li>
               <li>• Use Veo 3.1 Fast for quicker generation (~2x faster)</li>
-              <li>• First/Last frames define start/end of the video</li>
-              <li>• Reference images guide style but aren&apos;t used as frames</li>
+              <li>• Combine first+last frames OR first frame+reference images (not last+reference)</li>
               <li>• Negative prompts help avoid unwanted elements</li>
             </ul>
           </div>

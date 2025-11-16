@@ -135,11 +135,23 @@ async def generate_video(
         # Build config for advanced options
         config_kwargs = {}
 
+        # IMPORTANT: Veo 3.1 API does NOT support combining last_frame with reference_images
+        # Valid combinations:
+        #   - image (first frame) + last_frame (for frame interpolation)
+        #   - image (first frame) + reference_images (for style-guided video from starting frame)
+        #   - reference_images only (for style-guided video generation)
+        # Invalid: last_frame + reference_images
+        if req.lastFrame and req.referenceImages and len(req.referenceImages) > 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot use last frame and reference images together. "
+                "Use either: (1) first+last frames for interpolation, OR (2) first frame+reference images for style-guided generation. "
+                "See: https://ai.google.dev/gemini-api/docs/video",
+            )
+
         # Add negative prompt if provided
         if req.negativePrompt:
             config_kwargs["negative_prompt"] = req.negativePrompt
-
-        supports_reference_images = supports_advanced_frames
 
         # Add last frame if provided (ending frame) - goes in config
         if req.lastFrame:
@@ -155,9 +167,10 @@ async def generate_video(
             )
 
         # Add reference images if provided (up to 3, for content/style guidance) - goes in config
-        # NOTE: Reference images are only supported by veo-3.1-generate-preview, NOT fast variants
+        # NOTE: Reference images are only supported by standard Veo models, NOT fast variants
+        # IMPORTANT: Cannot be used together with first frame (image parameter)
         if req.referenceImages and len(req.referenceImages) > 0:
-            if not supports_reference_images:
+            if not supports_advanced_frames:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Reference images are not supported by {model_name}. "
@@ -167,10 +180,10 @@ async def generate_video(
             reference_images = []
             for img_data in req.referenceImages[:3]:  # Max 3 images
                 image_bytes, mime_type = extract_base64_bytes(img_data)
-                # Create VideoGenerationReferenceImage objects
-                # Don't specify referenceType - let the API use default behavior
+                # Create VideoGenerationReferenceImage with reference_type="asset"
                 ref_img = types.VideoGenerationReferenceImage(
-                    image=create_image_from_bytes(image_bytes, mime_type)
+                    image=create_image_from_bytes(image_bytes, mime_type),
+                    reference_type="asset",  # Use "asset" for style/content guidance
                 )
                 reference_images.append(ref_img)
             config_kwargs["reference_images"] = reference_images
