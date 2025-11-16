@@ -137,7 +137,7 @@ async def generate_video(
 
         # Add negative prompt if provided
         if req.negativePrompt:
-            config_kwargs["negativePrompt"] = req.negativePrompt
+            config_kwargs["negative_prompt"] = req.negativePrompt
 
         supports_reference_images = supports_advanced_frames
 
@@ -150,7 +150,9 @@ async def generate_video(
                     "Please use 'veo-3.1-generate-preview' (standard, not fast) for last frame support.",
                 )
             image_bytes, mime_type = extract_base64_bytes(req.lastFrame)
-            config_kwargs["lastFrame"] = create_image_from_bytes(image_bytes, mime_type)
+            config_kwargs["last_frame"] = create_image_from_bytes(
+                image_bytes, mime_type
+            )
 
         # Add reference images if provided (up to 3, for content/style guidance) - goes in config
         # NOTE: Reference images are only supported by veo-3.1-generate-preview, NOT fast variants
@@ -171,7 +173,7 @@ async def generate_video(
                     image=create_image_from_bytes(image_bytes, mime_type)
                 )
                 reference_images.append(ref_img)
-            config_kwargs["referenceImages"] = reference_images
+            config_kwargs["reference_images"] = reference_images
 
         # Create config if we have any advanced options
         config = types.GenerateVideosConfig(**config_kwargs) if config_kwargs else None
