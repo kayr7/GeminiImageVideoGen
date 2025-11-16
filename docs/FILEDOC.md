@@ -106,7 +106,8 @@ This document provides a comprehensive overview of every file in the project, in
 **Dependencies**: None  
 **Exports**: Docker image definition  
 **Base Image**: node:18-alpine  
-**Exposed Port**: 3000
+**Exposed Port**: 3000  
+**System Packages**: gcc, libgl1, libglib2.0-0
 
 ### `/docker-compose.yml`
 **Purpose**: Docker Compose orchestration for local development  
