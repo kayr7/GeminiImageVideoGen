@@ -20,6 +20,24 @@ _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
             "price": 0.0387,
             "priceUnit": "per image",
             "tier": "paid",
+            "capabilities": {
+                "reference_images": {"enabled": True, "max": 3},
+                "sample_count": {"min": 1, "max": 1},
+                "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
+            },
+        },
+        {
+            "id": "gemini-3-pro-image-preview",
+            "name": "Nano Banana Pro (Gemini 3 Pro)",
+            "description": "Professional asset production, complex instructions",
+            "price": 0.04,
+            "priceUnit": "per image",
+            "tier": "paid",
+            "capabilities": {
+                "reference_images": {"enabled": True, "max": 14},
+                "sample_count": {"min": 1, "max": 1},
+                "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
+            },
         },
         {
             "id": "imagen-4.0-generate-001",
@@ -28,6 +46,11 @@ _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
             "price": 0.04,
             "priceUnit": "per image",
             "tier": "paid",
+            "capabilities": {
+                "reference_images": {"enabled": False, "max": 0},
+                "sample_count": {"min": 1, "max": 4},
+                "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
+            },
         },
     ],
     "video": [
@@ -39,6 +62,17 @@ _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
             "priceUnit": "per second",
             "pricePerVideo": 3.20,
             "tier": "paid",
+            "capabilities": {
+                "durations": [4, 6, 8],
+                "resolutions": ["720p", "1080p"],
+                "aspect_ratios": ["16:9", "9:16"],
+                "video_reference_images": {
+                    "enabled": True,
+                    "max": 1,
+                    "supports_start_frame": True,
+                    "supports_end_frame": True,
+                },
+            },
         },
         {
             "id": "veo-3.1-fast-generate-preview",
@@ -48,6 +82,17 @@ _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
             "priceUnit": "per second",
             "pricePerVideo": 1.20,
             "tier": "paid",
+            "capabilities": {
+                "durations": [4, 6, 8],
+                "resolutions": ["720p", "1080p"],
+                "aspect_ratios": ["16:9", "9:16"],
+                "video_reference_images": {
+                    "enabled": True,
+                    "max": 1,
+                    "supports_start_frame": True,
+                    "supports_end_frame": True,
+                },
+            },
         },
         {
             "id": "veo-3.0-generate-001",
@@ -57,6 +102,17 @@ _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
             "priceUnit": "per second",
             "pricePerVideo": 3.20,
             "tier": "paid",
+            "capabilities": {
+                "durations": [4, 6, 8],
+                "resolutions": ["720p", "1080p"],
+                "aspect_ratios": ["16:9", "9:16"],
+                "video_reference_images": {
+                    "enabled": True,
+                    "max": 1,
+                    "supports_start_frame": True,
+                    "supports_end_frame": True,
+                },
+            },
         },
         {
             "id": "veo-3.0-fast-generate-001",
@@ -66,6 +122,17 @@ _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
             "priceUnit": "per second",
             "pricePerVideo": 1.20,
             "tier": "paid",
+            "capabilities": {
+                "durations": [4, 6, 8],
+                "resolutions": ["720p", "1080p"],
+                "aspect_ratios": ["16:9", "9:16"],
+                "video_reference_images": {
+                    "enabled": True,
+                    "max": 1,
+                    "supports_start_frame": True,
+                    "supports_end_frame": True,
+                },
+            },
         },
     ],
 }

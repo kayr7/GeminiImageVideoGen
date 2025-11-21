@@ -130,6 +130,19 @@ export interface ModelInfo {
   priceUnit?: string;
   pricePerVideo?: number;
   tier?: string;
+  capabilities?: {
+    reference_images?: { enabled: boolean; max: number };
+    sample_count?: { min: number; max: number };
+    resolutions?: string[];
+    aspect_ratios?: string[];
+    durations?: number[];
+    video_reference_images?: {
+      enabled: boolean;
+      max: number;
+      supports_start_frame: boolean;
+      supports_end_frame: boolean;
+    };
+  };
 }
 
 export interface ModelQuotaConfig {

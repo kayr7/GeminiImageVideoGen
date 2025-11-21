@@ -86,6 +86,11 @@ export default function ImageGenerator() {
     }
   }, [referenceImagesAllowed, referenceImages]);
 
+  const maxReferenceImages = useMemo(() => {
+    if (!selectedModel?.capabilities?.reference_images) return 5;
+    return selectedModel.capabilities.reference_images.max;
+  }, [selectedModel]);
+
   const imageGenerationEnabled = config ? config.features.imageGeneration : true;
 
   const handleGenerate = async () => {
@@ -265,14 +270,17 @@ export default function ImageGenerator() {
               label="Aspect Ratio"
               value={aspectRatio}
               onChange={(e) => setAspectRatio(e.target.value)}
-              options={CONSTANTS.ASPECT_RATIOS}
+              options={(selectedModel?.capabilities?.aspect_ratios || []).map(r => ({
+                value: r,
+                label: r
+              }))}
             />
           </div>
 
           <MultiFileUpload
-            label="Reference Images (Optional)"
+            label={`Reference Images (Max ${maxReferenceImages})`}
             accept="image/*"
-            maxFiles={5}
+            maxFiles={maxReferenceImages}
             onFilesSelect={(files, base64Array) => setReferenceImages(base64Array)}
             preview
             helperText={

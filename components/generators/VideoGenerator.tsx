@@ -59,6 +59,9 @@ export default function VideoGenerator() {
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
   const [model, setModel] = useState('');
+  const [resolution, setResolution] = useState('720p');
+  const [aspectRatio, setAspectRatio] = useState('16:9');
+  const [duration, setDuration] = useState('4');
 
   // Image options per Veo documentation
   // NOTE: Cannot combine last frame with reference images (API limitation)
@@ -106,11 +109,24 @@ export default function VideoGenerator() {
   );
 
   const supportsAdvancedFrames = useMemo(() => {
-    if (!model) {
-      return true;
-    }
-    return !model.toLowerCase().includes('fast');
-  }, [model]);
+    if (!selectedModel?.capabilities?.video_reference_images) return false;
+    return selectedModel.capabilities.video_reference_images.enabled;
+  }, [selectedModel]);
+
+  const maxReferenceImages = useMemo(() => {
+    if (!selectedModel?.capabilities?.video_reference_images) return 0;
+    return selectedModel.capabilities.video_reference_images.max;
+  }, [selectedModel]);
+
+  const supportsStartFrame = useMemo(() => {
+    if (!selectedModel?.capabilities?.video_reference_images) return false;
+    return selectedModel.capabilities.video_reference_images.supports_start_frame;
+  }, [selectedModel]);
+
+  const supportsEndFrame = useMemo(() => {
+    if (!selectedModel?.capabilities?.video_reference_images) return false;
+    return selectedModel.capabilities.video_reference_images.supports_end_frame;
+  }, [selectedModel]);
 
   const videoGenerationEnabled = config ? config.features.videoGeneration : true;
 
@@ -271,8 +287,12 @@ export default function VideoGenerator() {
       }
       
       if (referenceImages.length > 0) {
-        requestBody.referenceImages = referenceImages.slice(0, 3); // Max 3
+        requestBody.referenceImages = referenceImages.slice(0, maxReferenceImages);
       }
+
+      if (resolution) requestBody.resolution = resolution;
+      if (aspectRatio) requestBody.aspectRatio = aspectRatio;
+      if (duration) requestBody.durationSeconds = duration;
       
       const response = await apiFetch('/api/video/generate', {
         method: 'POST',
@@ -456,8 +476,8 @@ export default function VideoGenerator() {
                   preview
                   disabled={!supportsAdvancedFrames}
                   helperText={
-                    !supportsAdvancedFrames
-                      ? 'First frame is only available on standard Veo models (not fast variants)'
+                    !supportsStartFrame
+                      ? 'First frame is not supported by this model'
                       : 'Can be used with last frame OR reference images'
                   }
                 />
@@ -469,8 +489,8 @@ export default function VideoGenerator() {
                   preview
                   disabled={!supportsAdvancedFrames || referenceImages.length > 0}
                   helperText={
-                    !supportsAdvancedFrames
-                      ? 'Last frame is only available on standard Veo models (not fast variants)'
+                    !supportsEndFrame
+                      ? 'Last frame is not supported by this model'
                       : referenceImages.length > 0
                       ? 'Disabled: Cannot use with reference images'
                       : 'Works best with first frame for interpolation'
@@ -487,7 +507,7 @@ export default function VideoGenerator() {
                     disabled={!supportsAdvancedFrames || !!lastFrameInput}
                     helperText={
                       !supportsAdvancedFrames
-                        ? 'Reference images are only available on standard Veo models (not fast variants)'
+                        ? 'Reference images are not supported by this model'
                         : lastFrameInput
                         ? 'Disabled: Cannot use with last frame'
                         : 'Up to 3 images to guide visual style and content (not used as frames)'
@@ -564,7 +584,35 @@ export default function VideoGenerator() {
             </div>
           )}
 
-          {/* Note: Duration and Aspect Ratio removed - not configurable parameters */}
+          <div className="grid grid-cols-3 gap-4 mt-4">
+            <Select
+              label="Resolution"
+              value={resolution}
+              onChange={(e) => setResolution(e.target.value)}
+              options={(selectedModel?.capabilities?.resolutions || ['720p', '1080p']).map(r => ({
+                value: r,
+                label: r
+              }))}
+            />
+            <Select
+              label="Aspect Ratio"
+              value={aspectRatio}
+              onChange={(e) => setAspectRatio(e.target.value)}
+              options={(selectedModel?.capabilities?.aspect_ratios || ['16:9', '9:16']).map(r => ({
+                value: r,
+                label: r
+              }))}
+            />
+            <Select
+              label="Duration (s)"
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              options={(selectedModel?.capabilities?.durations || [4, 6, 8]).map(d => ({
+                value: d.toString(),
+                label: `${d}s`
+              }))}
+            />
+          </div>
 
           {error && (
             <div className="p-4 bg-red-50 border border-red-200 rounded-lg">

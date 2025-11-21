@@ -106,11 +106,15 @@ async def generate_image(
             # Nano Banana (Gemini 2.5 Flash Image) approach
             # Build contents with prompt and optional reference images
 
-            # Check reference image limit (Nano Banana typically supports 1-3 reference images)
-            if req.referenceImages and len(req.referenceImages) > 3:
+            # Check reference image limit using capabilities
+            capabilities = model_info.get("capabilities", {})
+            ref_img_config = capabilities.get("reference_images", {})
+            max_ref_images = ref_img_config.get("max", 3)
+            
+            if req.referenceImages and len(req.referenceImages) > max_ref_images:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Too many reference images. Nano Banana supports up to 3 reference images, you provided {len(req.referenceImages)}.",
+                    detail=f"Too many reference images. {model_name} supports up to {max_ref_images} reference images, you provided {len(req.referenceImages)}.",
                 )
 
             parts = [req.prompt]
