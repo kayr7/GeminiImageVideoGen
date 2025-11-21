@@ -136,6 +136,10 @@ export default function MediaGallery() {
         return null;
       }
       const blob = await response.blob();
+      // If the backend fell back to returning the full video, don't use it as an image thumbnail
+      if (blob.type.startsWith('video/')) {
+        return null;
+      }
       const blobUrl = URL.createObjectURL(blob);
       return blobUrl;
     } catch (err) {
@@ -396,12 +400,21 @@ export default function MediaGallery() {
                     </div>
                   ) : (
                     <div className="relative">
-                      <video
-                        preload="metadata"
-                        className="w-full max-h-72 bg-black pointer-events-none"
-                        src={thumbnailUrls[item.id] || blobUrls[item.id] || item.url}
-                        muted
-                      />
+                      {thumbnailUrls[item.id] ? (
+                        <img
+                          src={thumbnailUrls[item.id]}
+                          alt={item.prompt}
+                          className="w-full object-contain max-h-72 bg-black"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <video
+                          preload="metadata"
+                          className="w-full max-h-72 bg-black pointer-events-none"
+                          src={blobUrls[item.id] || item.url}
+                          muted
+                        />
+                      )}
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
                         <span className="opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-gray-800 text-gray-900 dark:text-white px-4 py-2 rounded-lg shadow-lg text-sm font-medium">
                           Click to view full video
