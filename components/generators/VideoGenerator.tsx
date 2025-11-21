@@ -201,7 +201,7 @@ export default function VideoGenerator() {
         const data = await response.json();
 
         if (!response.ok) {
-          throw new Error(data.error?.message || 'Failed to check video status');
+          throw new Error(data.detail || data.error?.message || 'Failed to check video status');
         }
 
         if (data.data.status === 'completed') {
@@ -238,7 +238,7 @@ export default function VideoGenerator() {
           await new Promise((resolve) => setTimeout(resolve, 10000));
           attempts++;
         } else if (data.data.status === 'failed') {
-          throw new Error('Video generation failed');
+          throw new Error(data.data.error || 'Video generation failed');
         }
       } catch (err) {
         throw err;
@@ -306,7 +306,7 @@ export default function VideoGenerator() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error?.message || 'Failed to generate video');
+        throw new Error(data.detail || data.error?.message || 'Failed to generate video');
       }
 
       // Start polling if we got a job ID

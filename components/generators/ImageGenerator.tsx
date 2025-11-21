@@ -131,7 +131,7 @@ export default function ImageGenerator() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error?.message || 'Failed to generate image');
+        throw new Error(data.detail || data.error?.message || 'Failed to generate image');
       }
 
       // Handle image data

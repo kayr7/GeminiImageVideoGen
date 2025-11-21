@@ -129,8 +129,10 @@ async def generate_video(
         model_name = model_info["id"]
 
         # Check if advanced features are supported by this model
-        # Reference images, first/last frames are only supported by non-fast variants
-        supports_advanced_frames = "fast" not in model_name.lower()
+        # Use capabilities from model info
+        capabilities = model_info.get("capabilities", {})
+        video_ref_config = capabilities.get("video_reference_images", {})
+        supports_advanced_frames = video_ref_config.get("enabled", False)
 
         # Build config for advanced options
         config_kwargs = {}

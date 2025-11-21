@@ -30,7 +30,7 @@ _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
             "id": "gemini-3-pro-image-preview",
             "name": "Nano Banana Pro (Gemini 3 Pro)",
             "description": "Professional asset production, complex instructions",
-            "price": 0.04,
+            "price": 0.14,
             "priceUnit": "per image",
             "tier": "paid",
             "capabilities": {
@@ -127,10 +127,10 @@ _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
                 "resolutions": ["720p", "1080p"],
                 "aspect_ratios": ["16:9", "9:16"],
                 "video_reference_images": {
-                    "enabled": True,
-                    "max": 1,
-                    "supports_start_frame": True,
-                    "supports_end_frame": True,
+                    "enabled": False,
+                    "max": 0,
+                    "supports_start_frame": False,
+                    "supports_end_frame": False,
                 },
             },
         },
