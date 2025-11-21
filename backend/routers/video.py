@@ -455,6 +455,25 @@ async def check_video_status(
                 response, "generatedVideos", None
             )
         if not generated_videos or len(generated_videos) == 0:
+            # Check for RAI filtering
+            rai_reasons = None
+            if isinstance(response, dict):
+                generate_video_response = response.get("generateVideoResponse", {})
+                rai_reasons = generate_video_response.get("raiMediaFilteredReasons")
+            else:
+                # Try attribute access for object
+                generate_video_response = getattr(response, "generateVideoResponse", None)
+                if generate_video_response:
+                    rai_reasons = getattr(generate_video_response, "raiMediaFilteredReasons", None)
+
+            if rai_reasons and len(rai_reasons) > 0:
+                error_message = f"Video generation filtered: {rai_reasons[0]}"
+                queue.update_job(jobId, {"status": "failed", "error": error_message})
+                return SuccessResponse(
+                    success=True,
+                    data={"jobId": jobId, "status": "failed", "error": error_message},
+                )
+
             raise Exception("No generated videos in response")
 
         generated_video = generated_videos[0]
