@@ -116,6 +116,7 @@ class ModelInfo(BaseModel):
     priceUnit: Optional[str] = None
     pricePerVideo: Optional[float] = None
     tier: Optional[str] = None
+    capabilities: Optional[Dict[str, Any]] = None
 
 
 class ModelQuotaConfig(BaseModel):

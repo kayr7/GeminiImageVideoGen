@@ -1,0 +1,92 @@
+Model: veo-3.1-generate-preview
+Capabilities: {
+  "durations": [
+    4,
+    6,
+    8
+  ],
+  "resolutions": [
+    "720p",
+    "1080p"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "video_reference_images": {
+    "enabled": true,
+    "max": 1,
+    "supports_start_frame": true,
+    "supports_end_frame": true
+  }
+}
+--------------------
+Model: veo-3.1-fast-generate-preview
+Capabilities: {
+  "durations": [
+    4,
+    6,
+    8
+  ],
+  "resolutions": [
+    "720p",
+    "1080p"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "video_reference_images": {
+    "enabled": true,
+    "max": 1,
+    "supports_start_frame": true,
+    "supports_end_frame": true
+  }
+}
+--------------------
+Model: veo-3.0-generate-001
+Capabilities: {
+  "durations": [
+    4,
+    6,
+    8
+  ],
+  "resolutions": [
+    "720p",
+    "1080p"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "video_reference_images": {
+    "enabled": true,
+    "max": 1,
+    "supports_start_frame": true,
+    "supports_end_frame": true
+  }
+}
+--------------------
+Model: veo-3.0-fast-generate-001
+Capabilities: {
+  "durations": [
+    4,
+    6,
+    8
+  ],
+  "resolutions": [
+    "720p",
+    "1080p"
+  ],
+  "aspect_ratios": [
+    "16:9",
+    "9:16"
+  ],
+  "video_reference_images": {
+    "enabled": false,
+    "max": 0,
+    "supports_start_frame": false,
+    "supports_end_frame": false
+  }
+}
+--------------------
