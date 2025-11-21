@@ -129,6 +129,17 @@ class MediaStorage:
 
         return media_id
 
+    def save_thumbnail(self, media_id: str, base64_data: str) -> bool:
+        """Save a thumbnail image for a specific media ID"""
+        try:
+            thumbnail_path = THUMBNAILS_DIR / f"{media_id}.jpg"
+            file_bytes = base64.b64decode(base64_data)
+            thumbnail_path.write_bytes(file_bytes)
+            return True
+        except Exception as e:
+            print(f"Failed to save thumbnail: {e}")
+            return False
+
     def get_media(self, media_id: str) -> dict:
         """Retrieve media from disk by ID"""
         with get_connection() as conn:

@@ -549,6 +549,11 @@ async def check_video_status(
 
         print(f"Video saved with ID: {media_id}")
 
+        # Save first frame as thumbnail if available
+        if first_frame_base64:
+            storage.save_thumbnail(media_id, first_frame_base64)
+            print(f"Saved thumbnail for video {media_id}")
+
         # Increment quota after successful video generation
         QuotaManager.increment_quota(user_id, "video")
 

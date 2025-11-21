@@ -3,11 +3,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from typing import Optional, Tuple
 from io import BytesIO
+import base64
 from PIL import Image
 from pathlib import Path
 
 from models import SuccessResponse, LoginUser
 from utils.media_storage import get_media_storage, THUMBNAILS_DIR
+from utils.video_frame_extractor import extract_frames
 from utils.auth import require_admin, get_current_user_with_db
 from utils.user_manager import User, UserManager
 from utils.database import get_connection
@@ -239,8 +241,48 @@ async def get_media_thumbnail(
                     },
                 )
         else:
-            # For videos, return the original (thumbnail generation requires video processing)
-            # TODO: Implement video thumbnail extraction with ffmpeg
+            # For videos, check if thumbnail already exists on disk
+            thumbnail_path = THUMBNAILS_DIR / f"{media_id}.jpg"
+
+            if thumbnail_path.exists():
+                # Return cached thumbnail
+                try:
+                    thumbnail_data = thumbnail_path.read_bytes()
+                    return Response(
+                        content=thumbnail_data,
+                        media_type="image/jpeg",
+                        headers={
+                            "Content-Disposition": f'inline; filename="{media_id}_thumb.jpg"',
+                            "Cache-Control": "public, max-age=31536000",
+                        },
+                    )
+                except Exception as e:
+                    print(f"Failed to read cached thumbnail: {e}")
+
+            # Generate thumbnail for video
+            try:
+                # Extract first frame
+                first_frame_b64, _ = extract_frames(result["data"])
+                
+                if first_frame_b64:
+                    # Save thumbnail to disk
+                    storage.save_thumbnail(media_id, first_frame_b64)
+                    
+                    # Decode for response
+                    thumbnail_data = base64.b64decode(first_frame_b64)
+                    
+                    return Response(
+                        content=thumbnail_data,
+                        media_type="image/jpeg",
+                        headers={
+                            "Content-Disposition": f'inline; filename="{media_id}_thumb.jpg"',
+                            "Cache-Control": "public, max-age=31536000",
+                        },
+                    )
+            except Exception as e:
+                print(f"Video thumbnail generation failed: {e}")
+
+            # Fallback: return the original video
             return Response(
                 content=result["data"],
                 media_type=result["metadata"]["mimeType"],
