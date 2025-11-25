@@ -50,6 +50,10 @@ export const CONSTANTS = {
       HOURLY: 10,
       DAILY: 50,
     },
+    SPEECH: {
+      HOURLY: 50,
+      DAILY: 200,
+    },
   },
   
   // Error codes

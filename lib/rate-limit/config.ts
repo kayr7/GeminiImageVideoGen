@@ -33,6 +33,16 @@ export function getRateLimitConfig(): RateLimitConfig {
           String(CONSTANTS.DEFAULT_RATE_LIMITS.MUSIC.DAILY)
       ),
     },
+    speech: {
+      hourly: parseInt(
+        process.env.SPEECH_MAX_PER_HOUR ||
+          String(CONSTANTS.DEFAULT_RATE_LIMITS.SPEECH.HOURLY)
+      ),
+      daily: parseInt(
+        process.env.SPEECH_MAX_PER_DAY ||
+          String(CONSTANTS.DEFAULT_RATE_LIMITS.SPEECH.DAILY)
+      ),
+    },
     storage: (process.env.RATE_LIMIT_STORAGE as 'memory' | 'redis') || 'memory',
     redisUrl: process.env.REDIS_URL,
   };
