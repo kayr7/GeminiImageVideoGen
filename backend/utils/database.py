@@ -376,6 +376,41 @@ MIGRATIONS: list[tuple[int, Iterable[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_user_quotas_reset ON user_quotas(quota_reset_at)",
         ),
     ),
+    (
+        9,
+        (
+            # Add 'audio' type to media table
+            """
+            CREATE TABLE IF NOT EXISTS media_new (
+                id TEXT PRIMARY KEY,
+                type TEXT NOT NULL CHECK (type IN ('image', 'video', 'audio')),
+                filename TEXT NOT NULL,
+                prompt TEXT,
+                model TEXT,
+                user_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                file_size INTEGER NOT NULL,
+                mime_type TEXT NOT NULL,
+                details TEXT,
+                ip_address TEXT
+            )
+            """,
+            # Copy existing media
+            """
+            INSERT INTO media_new (id, type, filename, prompt, model, user_id, created_at, file_size, mime_type, details, ip_address)
+            SELECT id, type, filename, prompt, model, user_id, created_at, file_size, mime_type, details, ip_address
+            FROM media
+            """,
+            # Drop old table
+            "DROP TABLE media",
+            # Rename new table
+            "ALTER TABLE media_new RENAME TO media",
+            # Recreate indexes
+            "CREATE INDEX IF NOT EXISTS idx_media_user_created_at ON media(user_id, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_media_type_created_at ON media(type, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_media_ip_address ON media(ip_address, created_at DESC)",
+        ),
+    ),
 ]
 
 _db_initialized = False
