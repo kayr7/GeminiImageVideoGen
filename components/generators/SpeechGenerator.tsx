@@ -70,7 +70,7 @@ export default function SpeechGenerator() {
     [availableSpeechModels, model]
   );
 
-  const availableVoices = useMemo(() => {
+  const availableVoices = useMemo<string[]>(() => {
     if (!selectedModel?.capabilities?.voices) {
         return ["Kore", "Puck", "Charon", "Aoede", "Fenrir"];
     }
