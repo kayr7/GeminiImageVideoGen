@@ -260,12 +260,12 @@ export default function SpeechGenerator() {
                     value={speaker.name}
                     onChange={(e) => handleSpeakerChange(index, 'name', e.target.value)}
                     placeholder="Speaker Name"
-                    className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm text-gray-900"
                   />
                   <select
                     value={speaker.voice}
                     onChange={(e) => handleSpeakerChange(index, 'voice', e.target.value)}
-                    className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm text-gray-900"
                   >
                     {availableVoices.map((v) => (
                       <option key={v} value={v}>
