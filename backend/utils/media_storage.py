@@ -13,6 +13,7 @@ from utils.database import get_connection, initialize_database
 STORAGE_ROOT = Path(__file__).parent.parent / ".media-storage"
 VIDEOS_DIR = STORAGE_ROOT / "videos"
 IMAGES_DIR = STORAGE_ROOT / "images"
+AUDIO_DIR = STORAGE_ROOT / "audio"
 THUMBNAILS_DIR = STORAGE_ROOT / "thumbnails"
 
 
@@ -25,7 +26,7 @@ class MediaStorage:
 
     def _ensure_directories(self) -> None:
         """Create storage directories if they don't exist."""
-        for directory in (STORAGE_ROOT, VIDEOS_DIR, IMAGES_DIR, THUMBNAILS_DIR):
+        for directory in (STORAGE_ROOT, VIDEOS_DIR, IMAGES_DIR, AUDIO_DIR, THUMBNAILS_DIR):
             directory.mkdir(parents=True, exist_ok=True)
 
     def _row_to_metadata(self, row) -> Dict[str, Any]:
@@ -62,17 +63,24 @@ class MediaStorage:
         """Save media to disk and return the media ID"""
         # Generate unique ID and filename
         media_id = str(uuid.uuid4())
+        default_mime = "image/png"
+        if media_type == "video":
+            default_mime = "video/mp4"
+        elif media_type == "audio":
+            default_mime = "audio/wav"
+            
         extension = self._get_extension(
-            metadata.get(
-                "mimeType", "video/mp4" if media_type == "video" else "image/png"
-            )
+            metadata.get("mimeType", default_mime)
         )
         filename = f"{media_id}.{extension}"
 
         # Determine file path
-        file_path = (
-            VIDEOS_DIR / filename if media_type == "video" else IMAGES_DIR / filename
-        )
+        if media_type == "video":
+            file_path = VIDEOS_DIR / filename
+        elif media_type == "audio":
+            file_path = AUDIO_DIR / filename
+        else:
+            file_path = IMAGES_DIR / filename
 
         # Convert base64 to bytes and save
         file_bytes = base64.b64decode(base64_data)
@@ -88,9 +96,7 @@ class MediaStorage:
             "userId": metadata.get("userId", "anonymous"),
             "createdAt": datetime.now(),
             "fileSize": len(file_bytes),
-            "mimeType": metadata.get(
-                "mimeType", "video/mp4" if media_type == "video" else "image/png"
-            ),
+            "mimeType": metadata.get("mimeType", default_mime),
             "details": metadata.get("details"),
             "ipAddress": metadata.get("ipAddress"),  # Track IP for abuse prevention
         }
@@ -154,11 +160,12 @@ class MediaStorage:
         media_meta = self._row_to_metadata(row)
 
         # Determine file path
-        file_path = (
-            VIDEOS_DIR / media_meta["filename"]
-            if media_meta["type"] == "video"
-            else IMAGES_DIR / media_meta["filename"]
-        )
+        if media_meta["type"] == "video":
+            file_path = VIDEOS_DIR / media_meta["filename"]
+        elif media_meta["type"] == "audio":
+            file_path = AUDIO_DIR / media_meta["filename"]
+        else:
+            file_path = IMAGES_DIR / media_meta["filename"]
 
         if not file_path.exists():
             print(f"Media file not found: {file_path}")
@@ -198,11 +205,12 @@ class MediaStorage:
 
         media_meta = self._row_to_metadata(row)
 
-        file_path = (
-            VIDEOS_DIR / media_meta["filename"]
-            if media_meta["type"] == "video"
-            else IMAGES_DIR / media_meta["filename"]
-        )
+        if media_meta["type"] == "video":
+            file_path = VIDEOS_DIR / media_meta["filename"]
+        elif media_meta["type"] == "audio":
+            file_path = AUDIO_DIR / media_meta["filename"]
+        else:
+            file_path = IMAGES_DIR / media_meta["filename"]
 
         try:
             if file_path.exists():
@@ -223,6 +231,7 @@ class MediaStorage:
                 "SELECT COUNT(*) as total,"
                 " SUM(CASE WHEN type = 'image' THEN 1 ELSE 0 END) as images,"
                 " SUM(CASE WHEN type = 'video' THEN 1 ELSE 0 END) as videos,"
+                " SUM(CASE WHEN type = 'audio' THEN 1 ELSE 0 END) as audio,"
                 " COALESCE(SUM(file_size), 0) as total_size,"
                 " MIN(created_at) as oldest,"
                 " MAX(created_at) as newest"
@@ -234,6 +243,7 @@ class MediaStorage:
             "totalSize": totals["total_size"],
             "images": totals["images"],
             "videos": totals["videos"],
+            "audio": totals["audio"] or 0,
             "oldestFile": totals["oldest"],
             "newestFile": totals["newest"],
         }
@@ -248,10 +258,20 @@ class MediaStorage:
             "image/jpg": "jpg",
             "image/webp": "webp",
             "image/gif": "gif",
+            "audio/wav": "wav",
+            "audio/mp3": "mp3",
+            "audio/mpeg": "mp3",
         }
-        return extensions.get(
-            mime_type, "mp4" if mime_type.startswith("video/") else "png"
-        )
+        
+        if mime_type in extensions:
+            return extensions[mime_type]
+            
+        if mime_type.startswith("video/"):
+            return "mp4"
+        if mime_type.startswith("audio/"):
+            return "wav"
+            
+        return "png"
 
 
 # Singleton instance

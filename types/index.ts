@@ -50,6 +50,24 @@ export interface MusicResponse {
   generatedAt: Date;
 }
 
+export interface SpeechGenerationParams {
+  text: string;
+  model?: string;
+  voice: string;
+  language?: string;
+}
+
+export interface SpeechResponse {
+  audioUrl?: string;
+  audioData?: string;
+  text: string;
+  voice: string;
+  language?: string;
+  model: string;
+  generatedAt: Date;
+  mediaId?: string;
+}
+
 // API Response Types
 export interface ApiResponse<T = unknown> {
   success: boolean;
@@ -90,6 +108,10 @@ export interface RateLimitConfig {
     hourly: number;
     daily: number;
   };
+  speech: {
+    hourly: number;
+    daily: number;
+  };
   storage: 'memory' | 'redis';
   redisUrl?: string;
 }
@@ -98,6 +120,7 @@ export interface UsageStats {
   image: { current: number; limit: number };
   video: { current: number; limit: number };
   music: { current: number; limit: number };
+  speech: { current: number; limit: number };
 }
 
 // Storage Interface
@@ -142,6 +165,7 @@ export interface ModelInfo {
       supports_start_frame: boolean;
       supports_end_frame: boolean;
     };
+    voices?: string[];
   };
 }
 
@@ -161,6 +185,7 @@ export interface FeatureFlags {
   imageGeneration: boolean;
   videoGeneration: boolean;
   musicGeneration: boolean;
+  speechGeneration: boolean;
 }
 
 export interface LoginConfig {

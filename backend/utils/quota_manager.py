@@ -62,6 +62,7 @@ class QuotaManager:
         "image": {"type": "limited", "limit": 100},
         "video": {"type": "limited", "limit": 50},
         "text": {"type": "limited", "limit": 200},
+        "speech": {"type": "limited", "limit": 100},
     }
 
     @staticmethod

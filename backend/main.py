@@ -20,6 +20,7 @@ from routers import (
     templates,
     system_prompts,
     text_generation,
+    speech,
 )
 from utils.user_manager import ensure_env_admin_exists
 from utils.database import initialize_database
@@ -65,6 +66,7 @@ app.include_router(usage.router, prefix="/api/usage", tags=["Usage Tracking"])
 app.include_router(templates.router, prefix="/api/text/templates", tags=["Text Templates"])
 app.include_router(system_prompts.router, prefix="/api/text/system-prompts", tags=["System Prompts"])
 app.include_router(text_generation.router, prefix="/api/text", tags=["Text Generation"])
+app.include_router(speech.router, prefix="/api/speech", tags=["Speech Generation"])
 
 
 @app.get("/")

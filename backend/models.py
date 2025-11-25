@@ -80,10 +80,29 @@ class MusicResponse(BaseModel):
     error: Optional[str] = None
 
 
+# Speech Generation Models
+class SpeechGenerationRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=10000)
+    voice: str = Field(..., min_length=1)
+    language: Optional[str] = None
+    model: Optional[str] = Field(default="gemini-2.5-flash-preview-tts")
+
+
+class SpeechResponse(BaseModel):
+    audioUrl: Optional[str] = None
+    audioData: Optional[str] = None
+    text: str
+    voice: str
+    language: Optional[str] = None
+    model: str
+    generatedAt: datetime
+    mediaId: Optional[str] = None
+
+
 # Media Storage Models
 class MediaMetadata(BaseModel):
     id: str
-    type: str  # 'image' or 'video'
+    type: str  # 'image', 'video', or 'audio'
     filename: str
     prompt: str
     model: str
@@ -135,6 +154,7 @@ class FeatureFlags(BaseModel):
     imageGeneration: bool = True
     videoGeneration: bool = True
     musicGeneration: bool = True
+    speechGeneration: bool = True
 
 
 class LoginConfig(BaseModel):

@@ -13,7 +13,7 @@ interface QuotaInfo {
 }
 
 interface QuotaDisplayProps {
-  generationType: 'image' | 'video' | 'edit';
+  generationType: 'image' | 'video' | 'edit' | 'speech';
   className?: string;
 }
 
@@ -73,6 +73,17 @@ export default function QuotaDisplay({ generationType, className = '' }: QuotaDi
     return null;
   }
 
+  // Helper for labels
+  const getLabel = (type: string) => {
+      switch(type) {
+          case 'image': return '🖼️ Image';
+          case 'video': return '🎬 Video';
+          case 'edit': return '✏️ Edit';
+          case 'speech': return '🗣️ Speech';
+          default: return type;
+      }
+  };
+
   // Unlimited quota
   if (quota.quotaType === 'unlimited' || quota.quotaLimit === null) {
     return (
@@ -80,7 +91,7 @@ export default function QuotaDisplay({ generationType, className = '' }: QuotaDi
         <div className="flex items-center justify-between">
           <div>
             <p className="text-xs font-medium text-green-900 dark:text-green-100">
-              {generationType === 'image' ? '🖼️ Image' : generationType === 'video' ? '🎬 Video' : '✏️ Edit'} Quota
+              {getLabel(generationType)} Quota
             </p>
             <p className="text-sm font-bold text-green-700 dark:text-green-300 mt-0.5">
               Unlimited (Total Usage)
@@ -125,8 +136,8 @@ export default function QuotaDisplay({ generationType, className = '' }: QuotaDi
         used: 'text-blue-700 dark:text-blue-300',
       };
 
-  const icon = generationType === 'image' ? '🖼️' : generationType === 'video' ? '🎬' : '✏️';
-  const typeLabel = generationType === 'image' ? 'Image' : generationType === 'video' ? 'Video' : 'Edit';
+  const icon = generationType === 'image' ? '🖼️' : generationType === 'video' ? '🎬' : generationType === 'speech' ? '🗣️' : '✏️';
+  const typeLabel = generationType === 'image' ? 'Image' : generationType === 'video' ? 'Video' : generationType === 'speech' ? 'Speech' : 'Edit';
 
   return (
     <div className={`p-3 ${colorScheme.bg} border ${colorScheme.border} rounded-lg ${className}`}>

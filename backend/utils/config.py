@@ -135,6 +135,21 @@ _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
             },
         },
     ],
+    "speech": [
+        {
+            "id": "gemini-2.5-flash-preview-tts",
+            "name": "Gemini 2.5 Flash TTS",
+            "description": "Fast text-to-speech generation",
+            "price": 0.01,
+            "priceUnit": "per generation",
+            "tier": "paid",
+            "capabilities": {
+                "voices": [
+                    "Kore", "Puck", "Charon", "Aoede", "Fenrir"
+                ]
+            },
+        },
+    ],
 }
 
 
@@ -272,6 +287,7 @@ def get_feature_flags() -> Dict[str, bool]:
         "imageGeneration": _parse_bool(os.getenv("ENABLE_IMAGE_GENERATION"), True),
         "videoGeneration": _parse_bool(os.getenv("ENABLE_VIDEO_GENERATION"), True),
         "musicGeneration": _parse_bool(os.getenv("ENABLE_MUSIC_GENERATION"), True),
+        "speechGeneration": _parse_bool(os.getenv("ENABLE_SPEECH_GENERATION"), True),
     }
 
 
