@@ -13,7 +13,7 @@ export class RateLimiter {
    */
   async checkLimit(
     userId: string,
-    resource: 'image' | 'video' | 'music'
+    resource: 'image' | 'video' | 'music' | 'speech'
   ): Promise<RateLimitResult> {
     const now = new Date();
     const hourKey = this.getHourKey(userId, resource, now);
@@ -69,7 +69,7 @@ export class RateLimiter {
    */
   async incrementUsage(
     userId: string,
-    resource: 'image' | 'video' | 'music'
+    resource: 'image' | 'video' | 'music' | 'speech'
   ): Promise<void> {
     const now = new Date();
     const hourKey = this.getHourKey(userId, resource, now);
@@ -96,6 +96,7 @@ export class RateLimiter {
     const imageHourly = (await this.storage.get(this.getHourKey(userId, 'image', now))) || 0;
     const videoHourly = (await this.storage.get(this.getHourKey(userId, 'video', now))) || 0;
     const musicHourly = (await this.storage.get(this.getHourKey(userId, 'music', now))) || 0;
+    const speechHourly = (await this.storage.get(this.getHourKey(userId, 'speech', now))) || 0;
 
     return {
       image: {
@@ -110,6 +111,10 @@ export class RateLimiter {
         current: musicHourly,
         limit: this.config.music.hourly,
       },
+      speech: {
+        current: speechHourly,
+        limit: this.config.speech.hourly,
+      },
     };
   }
 
@@ -118,7 +123,7 @@ export class RateLimiter {
    */
   async enforceLimit(
     userId: string,
-    resource: 'image' | 'video' | 'music'
+    resource: 'image' | 'video' | 'music' | 'speech'
   ): Promise<void> {
     const result = await this.checkLimit(userId, resource);
 
