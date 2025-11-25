@@ -48,6 +48,7 @@ export default function AdminPage() {
   const [defaultQuotaType, setDefaultQuotaType] = useState<'limited' | 'unlimited'>('limited');
   const [imageQuotaLimit, setImageQuotaLimit] = useState('100');
   const [videoQuotaLimit, setVideoQuotaLimit] = useState('50');
+  const [speechQuotaLimit, setSpeechQuotaLimit] = useState('100');
   const [textQuotaLimit, setTextQuotaLimit] = useState('200');
   const [bulkTags, setBulkTags] = useState('');
   const [bulkCreateLoading, setBulkCreateLoading] = useState(false);
@@ -157,6 +158,10 @@ export default function AdminPage() {
           type: defaultQuotaType,
           limit: parseInt(videoQuotaLimit) || 50,
         };
+        defaultQuotas.speech = {
+          type: defaultQuotaType,
+          limit: parseInt(speechQuotaLimit) || 100,
+        };
         defaultQuotas.text = {
           type: defaultQuotaType,
           limit: parseInt(textQuotaLimit) || 200,
@@ -164,6 +169,7 @@ export default function AdminPage() {
       } else {
         defaultQuotas.image = { type: 'unlimited', limit: null };
         defaultQuotas.video = { type: 'unlimited', limit: null };
+        defaultQuotas.speech = { type: 'unlimited', limit: null };
         defaultQuotas.text = { type: 'unlimited', limit: null };
       }
 
@@ -194,6 +200,7 @@ export default function AdminPage() {
       setBulkEmails('');
       setImageQuotaLimit('100');
       setVideoQuotaLimit('50');
+      setSpeechQuotaLimit('100');
       setBulkTags('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create users');
@@ -320,7 +327,7 @@ export default function AdminPage() {
   };
 
   const updateQuotaValue = (userId: string, generationType: string, field: 'type' | 'limit', value: any, originalQuota: Quota | null) => {
-    const defaultLimit = generationType === 'text' ? 200 : generationType === 'image' ? 100 : 50;
+    const defaultLimit = generationType === 'text' ? 200 : generationType === 'image' ? 100 : generationType === 'speech' ? 100 : 50;
     const currentEdit = editingQuotas[userId]?.[generationType] || {
       type: originalQuota?.quotaType ?? 'limited',
       limit: originalQuota?.quotaLimit ?? defaultLimit,
@@ -435,6 +442,13 @@ export default function AdminPage() {
                     min="0"
                   />
                   <Input
+                    label="Speech Quota"
+                    type="number"
+                    value={speechQuotaLimit}
+                    onChange={(e) => setSpeechQuotaLimit(e.target.value)}
+                    min="0"
+                  />
+                  <Input
                     label="Text Quota"
                     type="number"
                     value={textQuotaLimit}
@@ -531,6 +545,9 @@ export default function AdminPage() {
                     </div>
                   </th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
+                    Speech Quota
+                  </th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
                     Text Quota
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider">
@@ -545,6 +562,7 @@ export default function AdminPage() {
                 {users.map((usr) => {
                   const imageQuota = getQuotaByType(usr.quotas, 'image');
                   const videoQuota = getQuotaByType(usr.quotas, 'video');
+                  const speechQuota = getQuotaByType(usr.quotas, 'speech');
                   const textQuota = getQuotaByType(usr.quotas, 'text');
 
         return (
@@ -595,6 +613,11 @@ export default function AdminPage() {
                         {renderQuotaCell(usr.id, 'video', videoQuota)}
                       </td>
 
+                      {/* Speech Quota */}
+                      <td className="px-4 py-4">
+                        {renderQuotaCell(usr.id, 'speech', speechQuota)}
+                      </td>
+
                       {/* Text Quota */}
                       <td className="px-4 py-4">
                         {renderQuotaCell(usr.id, 'text', textQuota)}
@@ -639,7 +662,7 @@ export default function AdminPage() {
     
     if (!quota) {
       const currentType = editData?.type ?? 'limited';
-      const currentLimit = editData?.limit ?? (type === 'text' ? 200 : type === 'image' ? 100 : 50);
+      const currentLimit = editData?.limit ?? (type === 'text' ? 200 : type === 'image' ? 100 : type === 'speech' ? 100 : 50);
       const hasChanges = editData?.hasChanges ?? false;
 
       return (

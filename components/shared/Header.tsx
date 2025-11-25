@@ -23,6 +23,9 @@ export default function Header() {
       if (featureFlags?.videoGeneration ?? true) {
         items.push({ name: 'Video', href: '/video' });
       }
+      if (featureFlags?.speechGeneration ?? true) {
+        items.push({ name: 'Speech', href: '/speech' });
+      }
       items.push({ name: 'Text', href: '/text' });
       items.push({ name: 'Gallery', href: '/gallery' });
       if (token) {
