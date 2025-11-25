@@ -50,10 +50,16 @@ export interface MusicResponse {
   generatedAt: Date;
 }
 
+export interface SpeakerConfig {
+  name: string;
+  voice: string;
+}
+
 export interface SpeechGenerationParams {
   text: string;
   model?: string;
-  voice: string;
+  voice?: string;
+  speakers?: SpeakerConfig[];
   language?: string;
 }
 

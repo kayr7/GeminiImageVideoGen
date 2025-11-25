@@ -81,9 +81,15 @@ class MusicResponse(BaseModel):
 
 
 # Speech Generation Models
+class SpeakerConfig(BaseModel):
+    name: str = Field(..., min_length=1)
+    voice: str = Field(..., min_length=1)
+
+
 class SpeechGenerationRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=10000)
-    voice: str = Field(..., min_length=1)
+    voice: Optional[str] = Field(None, min_length=1)
+    speakers: Optional[List[SpeakerConfig]] = None
     language: Optional[str] = None
     model: Optional[str] = Field(default="gemini-2.5-flash-preview-tts")
 

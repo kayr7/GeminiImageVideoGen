@@ -95,7 +95,7 @@ async def generate_speech(
         # Validate voice
         capabilities = model_info.get("capabilities", {})
         allowed_voices = capabilities.get("voices", [])
-        if allowed_voices and req.voice not in allowed_voices:
+        if allowed_voices and req.voice and req.voice not in allowed_voices and not req.speakers:
              # If voice not in list, we might still try it if the list is not exhaustive, 
              # but for now let's assume the config is the source of truth if populated.
              # However, to be safe and flexible, we'll just warn or proceed. 
@@ -122,13 +122,35 @@ async def generate_speech(
             #     )
             # )
 
-            speech_config = types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=req.voice,
+            if req.speakers:
+                # Multi-speaker configuration
+                speaker_voice_configs = []
+                for speaker in req.speakers:
+                    speaker_voice_configs.append(
+                        types.SpeakerVoiceConfig(
+                            speaker=speaker.name,
+                            voice_config=types.VoiceConfig(
+                                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                    voice_name=speaker.voice,
+                                )
+                            )
+                        )
+                    )
+                
+                speech_config = types.SpeechConfig(
+                    multi_speaker_voice_config=types.MultiSpeakerVoiceConfig(
+                        speaker_voice_configs=speaker_voice_configs
                     )
                 )
-            )
+            else:
+                # Single speaker configuration
+                speech_config = types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name=req.voice,
+                        )
+                    )
+                )
 
             config = types.GenerateContentConfig(
                 response_modalities=["AUDIO"],

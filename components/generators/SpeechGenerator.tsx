@@ -38,6 +38,11 @@ export default function SpeechGenerator() {
   const [model, setModel] = useState<string>('');
   const [voice, setVoice] = useState('Kore');
   const [language, setLanguage] = useState('en-US');
+  const [isMultiSpeaker, setIsMultiSpeaker] = useState(false);
+  const [speakers, setSpeakers] = useState<{ name: string; voice: string }[]>([
+    { name: 'Speaker A', voice: 'Kore' },
+    { name: 'Speaker B', voice: 'Puck' },
+  ]);
   const [generatedAudio, setGeneratedAudio] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +84,20 @@ export default function SpeechGenerator() {
 
   const speechGenerationEnabled = config ? config.features.speechGeneration : true;
 
+  const handleAddSpeaker = () => {
+    setSpeakers([...speakers, { name: `Speaker ${String.fromCharCode(65 + speakers.length)}`, voice: availableVoices[0] }]);
+  };
+
+  const handleRemoveSpeaker = (index: number) => {
+    setSpeakers(speakers.filter((_, i) => i !== index));
+  };
+
+  const handleSpeakerChange = (index: number, field: 'name' | 'voice', value: string) => {
+    const newSpeakers = [...speakers];
+    newSpeakers[index] = { ...newSpeakers[index], [field]: value };
+    setSpeakers(newSpeakers);
+  };
+
   const handleGenerate = async () => {
     if (!text.trim()) {
       setError('Please enter text to generate speech');
@@ -108,7 +127,8 @@ export default function SpeechGenerator() {
         body: JSON.stringify({
           text,
           model: model || undefined,
-          voice,
+          voice: isMultiSpeaker ? undefined : voice,
+          speakers: isMultiSpeaker ? speakers : undefined,
           language
         }),
       });
@@ -217,9 +237,65 @@ export default function SpeechGenerator() {
           {token && <QuotaDisplay generationType="speech" />}
           <h2 className="text-2xl font-bold mb-4">Speech Generation</h2>
 
+          <div className="flex items-center space-x-2 mb-4">
+            <input
+              type="checkbox"
+              id="multiSpeaker"
+              checked={isMultiSpeaker}
+              onChange={(e) => setIsMultiSpeaker(e.target.checked)}
+              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <label htmlFor="multiSpeaker" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Enable Multi-Speaker Mode
+            </label>
+          </div>
+
+          {isMultiSpeaker && (
+            <div className="space-y-3 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Speakers</h3>
+              {speakers.map((speaker, index) => (
+                <div key={index} className="flex gap-2 items-center">
+                  <input
+                    type="text"
+                    value={speaker.name}
+                    onChange={(e) => handleSpeakerChange(index, 'name', e.target.value)}
+                    placeholder="Speaker Name"
+                    className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                  />
+                  <select
+                    value={speaker.voice}
+                    onChange={(e) => handleSpeakerChange(index, 'voice', e.target.value)}
+                    className="rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                  >
+                    {availableVoices.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                  {speakers.length > 1 && (
+                    <button
+                      onClick={() => handleRemoveSpeaker(index)}
+                      className="text-red-600 hover:text-red-800"
+                      title="Remove speaker"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+              ))}
+              <Button onClick={handleAddSpeaker} variant="secondary" size="sm" className="w-full mt-2">
+                Add Speaker
+              </Button>
+              <p className="text-xs text-gray-500 mt-2">
+                Use these names in your text like "Speaker Name: Hello world!"
+              </p>
+            </div>
+          )}
+
           <Textarea
             label="Text"
-            placeholder="Enter the text you want to convert to speech..."
+            placeholder={isMultiSpeaker ? "Speaker A: Hello!\nSpeaker B: Hi there!" : "Enter the text you want to convert to speech..."}
             value={text}
             onChange={(e) => setText(e.target.value)}
             rows={6}
@@ -242,15 +318,17 @@ export default function SpeechGenerator() {
               disabled={availableSpeechModels.length === 0}
             />
 
-            <Select
-              label="Voice"
-              value={voice}
-              onChange={(e) => setVoice(e.target.value)}
-              options={availableVoices.map(v => ({
-                value: v,
-                label: v
-              }))}
-            />
+            {!isMultiSpeaker && (
+              <Select
+                label="Voice"
+                value={voice}
+                onChange={(e) => setVoice(e.target.value)}
+                options={availableVoices.map(v => ({
+                  value: v,
+                  label: v
+                }))}
+              />
+            )}
           </div>
           
            <Select
@@ -322,6 +400,7 @@ export default function SpeechGenerator() {
               <li>• Use punctuation to control pacing</li>
               <li>• Choose the voice that best fits the tone</li>
               <li>• Experiment with different languages</li>
+              {isMultiSpeaker && <li>• Use "Speaker Name:" to switch voices</li>}
             </ul>
           </div>
         </div>
