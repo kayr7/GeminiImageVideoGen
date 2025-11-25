@@ -8,7 +8,7 @@ export default function SpeechPage() {
           Speech Generation
         </h1>
         <p className="text-gray-600 dark:text-gray-300">
-          Convert text to lifelike speech using Google's Gemini models.
+          Convert text to lifelike speech using Google&apos;s Gemini models.
         </p>
       </div>
       
