@@ -288,7 +288,7 @@ export default function SpeechGenerator() {
                 Add Speaker
               </Button>
               <p className="text-xs text-gray-500 mt-2">
-                Use these names in your text like "Speaker Name: Hello world!"
+                Use these names in your text like &quot;Speaker Name: Hello world!&quot;
               </p>
             </div>
           )}
@@ -400,7 +400,7 @@ export default function SpeechGenerator() {
               <li>• Use punctuation to control pacing</li>
               <li>• Choose the voice that best fits the tone</li>
               <li>• Experiment with different languages</li>
-              {isMultiSpeaker && <li>• Use "Speaker Name:" to switch voices</li>}
+              {isMultiSpeaker && <li>• Use &quot;Speaker Name:&quot; to switch voices</li>}
             </ul>
           </div>
         </div>
