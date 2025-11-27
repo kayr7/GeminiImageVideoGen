@@ -176,8 +176,14 @@ class MediaStorage:
 
         return {"data": file_bytes, "metadata": media_meta}
 
-    def list_user_media(self, user_id: str, media_type: str = None) -> list:
-        """List all media for a user"""
+    def list_user_media(
+        self,
+        user_id: str,
+        media_type: str = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list:
+        """List all media for a user with pagination"""
         query = "SELECT * FROM media WHERE user_id = ?"
         params: List[Any] = [user_id]
 
@@ -185,12 +191,26 @@ class MediaStorage:
             query += " AND type = ?"
             params.append(media_type)
 
-        query += " ORDER BY datetime(created_at) DESC"
+        query += " ORDER BY datetime(created_at) DESC LIMIT ? OFFSET ?"
+        params.append(limit)
+        params.append(offset)
 
         with get_connection() as conn:
             rows = conn.execute(query, params).fetchall()
 
         return [self._row_to_metadata(row) for row in rows]
+
+    def count_user_media(self, user_id: str, media_type: str = None) -> int:
+        """Count total media for a user"""
+        query = "SELECT COUNT(*) FROM media WHERE user_id = ?"
+        params: List[Any] = [user_id]
+
+        if media_type:
+            query += " AND type = ?"
+            params.append(media_type)
+
+        with get_connection() as conn:
+            return conn.execute(query, params).fetchone()[0]
 
     def delete_media(self, media_id: str) -> bool:
         """Delete media file and metadata by ID"""

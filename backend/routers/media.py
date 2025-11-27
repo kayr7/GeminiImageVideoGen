@@ -26,7 +26,8 @@ THUMBNAIL_MAX_SIZE = (400, 400)  # Maximum thumbnail dimensions
 @router.get("/list", response_model=SuccessResponse)
 async def list_media(
     type: Optional[str] = Query(None, description="Filter by type: 'image' or 'video'"),
-    limit: int = Query(50, ge=1, le=200),
+    page: int = Query(1, ge=1, description="Page number"),
+    limit: int = Query(20, ge=1, le=100, description="Items per page"),
     auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
 ):
     """
@@ -37,9 +38,12 @@ async def list_media(
     try:
         login_user, db_user = auth
         storage = get_media_storage()
+        offset = (page - 1) * limit
 
         # Check if admin
         is_admin = db_user.is_admin
+        media_list = []
+        total_count = 0
 
         if is_admin:
             # Admin: Get media from all users they invited
@@ -49,28 +53,32 @@ async def list_media(
             # Include admin's own media
             managed_user_ids.append(db_user.id)
 
-            # Query database for media from managed users
             with get_connection() as conn:
                 placeholders = ",".join("?" * len(managed_user_ids))
-                query = f"""
-                    SELECT id, type, prompt, model, user_id, created_at,
-                           file_size, mime_type, details, ip_address
-                    FROM media
-                    WHERE user_id IN ({placeholders})
-                """
+                base_query = f"FROM media WHERE user_id IN ({placeholders})"
                 params = list(managed_user_ids)
 
                 if type:
-                    query += " AND type = ?"
+                    base_query += " AND type = ?"
                     params.append(type)
 
-                query += " ORDER BY created_at DESC LIMIT ?"
+                # Get total count
+                count_query = f"SELECT COUNT(*) {base_query}"
+                total_count = conn.execute(count_query, params).fetchone()[0]
+
+                # Get paginated items
+                query = f"""
+                    SELECT id, type, prompt, model, user_id, created_at,
+                           file_size, mime_type, details, ip_address
+                    {base_query}
+                    ORDER BY created_at DESC LIMIT ? OFFSET ?
+                """
                 params.append(limit)
+                params.append(offset)
 
                 rows = conn.execute(query, params).fetchall()
 
                 # Build media list with user email and IP
-                media_list = []
                 for row in rows:
                     user = UserManager.get_user_by_id(row["user_id"])
                     media_item = {
@@ -86,19 +94,30 @@ async def list_media(
                         "details": row["details"],
                         "ipAddress": row["ip_address"],
                         "url": f"/api/media/{row['id']}",
+                        "thumbnailUrl": f"/api/media/{row['id']}/thumbnail",
                     }
                     media_list.append(media_item)
         else:
             # Regular user: Only see own media
-            media_list = storage.list_user_media(db_user.id, media_type=type)
-            media_list = media_list[:limit]
+            total_count = storage.count_user_media(db_user.id, media_type=type)
+            media_list = storage.list_user_media(
+                db_user.id, media_type=type, limit=limit, offset=offset
+            )
 
             # Add URL to each item
             for item in media_list:
                 item["url"] = f"/api/media/{item['id']}"
+                item["thumbnailUrl"] = f"/api/media/{item['id']}/thumbnail"
 
         return SuccessResponse(
-            success=True, data={"media": media_list, "total": len(media_list)}
+            success=True,
+            data={
+                "media": media_list,
+                "total": total_count,
+                "page": page,
+                "limit": limit,
+                "pages": (total_count + limit - 1) // limit,
+            },
         )
 
     except Exception as e:
