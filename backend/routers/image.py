@@ -93,8 +93,8 @@ async def generate_image(
             raise HTTPException(status_code=status_code, detail=str(error))
         model_name = model_info["id"]
 
-        # Determine if using Nano Banana or Imagen
-        is_nano_banana = "flash" in model_name.lower() or "gemini" in model_name.lower()
+        # Determine if using Nano Banana (generateContent) or Imagen (predict)
+        is_nano_banana = "gemini" in model_name.lower()
 
         if not is_nano_banana and req.referenceImages:
             raise HTTPException(
@@ -133,7 +133,7 @@ async def generate_image(
                     )
 
             # Generate with Nano Banana
-            config = {"response_modalities": ["Image"]}
+            config = {"response_modalities": ["Text", "Image"]}
 
             if req.aspectRatio and req.aspectRatio != "1:1":
                 config["image_config"] = {"aspect_ratio": req.aspectRatio}
@@ -376,7 +376,7 @@ async def edit_image(
             raise HTTPException(status_code=status_code, detail=str(error))
         model_name = model_info["id"]
 
-        is_nano_banana = "flash" in model_name.lower() or "gemini" in model_name.lower()
+        is_nano_banana = "gemini" in model_name.lower()
 
         if is_nano_banana:
             # Build parts with prompt and images
@@ -389,7 +389,7 @@ async def edit_image(
                     {"inline_data": {"mime_type": "image/png", "data": img_data}}
                 )
 
-            config = {"response_modalities": ["Image"]}
+            config = {"response_modalities": ["Text", "Image"]}
 
             if req.aspectRatio and req.aspectRatio != "1:1":
                 config["image_config"] = {"aspect_ratio": req.aspectRatio}

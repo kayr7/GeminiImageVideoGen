@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 # Image Generation Models
 class ImageGenerationRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=10000)
-    model: Optional[str] = Field(default="gemini-2.5-flash-image")
+    model: Optional[str] = Field(default="gemini-3.1-flash-image-preview")
     aspectRatio: Optional[str] = Field(default="1:1")
     negativePrompt: Optional[str] = None
     referenceImages: Optional[List[str]] = None
@@ -18,7 +18,7 @@ class ImageGenerationRequest(BaseModel):
 
 class ImageEditRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=10000)
-    model: Optional[str] = Field(default="gemini-2.5-flash-image")
+    model: Optional[str] = Field(default="gemini-3.1-flash-image-preview")
     aspectRatio: Optional[str] = Field(default="1:1")
     sourceImages: Optional[List[str]] = None
     maskImage: Optional[str] = None

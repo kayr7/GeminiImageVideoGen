@@ -14,6 +14,22 @@ ModelInfoDict = Dict[str, Any]
 _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
     "image": [
         {
+            "id": "gemini-3.1-flash-image-preview",
+            "name": "Nano Banana 2 (Gemini 3.1 Flash)",
+            "description": "Best image generation & editing — pro-level quality at flash speed",
+            "price": 0.067,
+            "priceUnit": "per image",
+            "tier": "paid",
+            "capabilities": {
+                "reference_images": {"enabled": True, "max": 10},
+                "sample_count": {"min": 1, "max": 1},
+                "aspect_ratios": [
+                    "1:1", "1:4", "1:8", "2:3", "3:2", "3:4",
+                    "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9",
+                ],
+            },
+        },
+        {
             "id": "gemini-2.5-flash-image",
             "name": "Nano Banana (Gemini 2.5 Flash)",
             "description": "Fast, conversational image generation",
@@ -40,10 +56,36 @@ _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
             },
         },
         {
+            "id": "imagen-4.0-ultra-generate-001",
+            "name": "Imagen 4.0 Ultra",
+            "description": "Highest quality Imagen — best prompt alignment, up to 2K",
+            "price": 0.06,
+            "priceUnit": "per image",
+            "tier": "paid",
+            "capabilities": {
+                "reference_images": {"enabled": False, "max": 0},
+                "sample_count": {"min": 1, "max": 4},
+                "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
+            },
+        },
+        {
             "id": "imagen-4.0-generate-001",
             "name": "Imagen 4.0",
-            "description": "Highest quality image generation (requires special access)",
+            "description": "High quality text-to-image generation, up to 2K",
             "price": 0.04,
+            "priceUnit": "per image",
+            "tier": "paid",
+            "capabilities": {
+                "reference_images": {"enabled": False, "max": 0},
+                "sample_count": {"min": 1, "max": 4},
+                "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
+            },
+        },
+        {
+            "id": "imagen-4.0-fast-generate-001",
+            "name": "Imagen 4.0 Fast",
+            "description": "Speed-optimized image generation — cheapest option",
+            "price": 0.02,
             "priceUnit": "per image",
             "tier": "paid",
             "capabilities": {

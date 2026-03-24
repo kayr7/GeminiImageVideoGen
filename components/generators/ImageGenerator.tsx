@@ -350,8 +350,10 @@ export default function ImageGenerator() {
               <li>• Mention style, mood, lighting, and composition</li>
               <li>• <strong>Multiple images:</strong> Combine elements or transfer style</li>
               <li>• <strong>Single image:</strong> Best for editing or variations</li>
-              <li>• Nano Banana: Best for conversational, iterative editing</li>
-              <li>• Imagen: Best for photorealistic, high-quality results</li>
+              <li>• <strong>Nano Banana 2:</strong> Best overall — pro quality at flash speed, up to 10 ref images</li>
+              <li>• <strong>Nano Banana Pro:</strong> Reasoning-driven, complex instructions, up to 14 ref images</li>
+              <li>• <strong>Imagen Ultra:</strong> Highest quality text-to-image (no ref images)</li>
+              <li>• <strong>Imagen Fast:</strong> Cheapest &amp; fastest text-to-image</li>
             </ul>
           </div>
         </div>

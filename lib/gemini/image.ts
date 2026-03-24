@@ -15,10 +15,10 @@ export async function generateImage(
     throw new Error('GEMINI_API_KEY not configured');
   }
 
-  const modelName = (params.model || '').trim() || 'gemini-2.5-flash-image';
+  const modelName = (params.model || '').trim() || 'gemini-3.1-flash-image-preview';
 
   // Determine if it's Nano Banana (uses generateContent) or Imagen (uses predict)
-  const isNanoBanana = /flash|gemini/i.test(modelName);
+  const isNanoBanana = /gemini/i.test(modelName);
 
   try {
     return await retryWithBackoff(async () => {
@@ -50,7 +50,7 @@ export async function generateImage(
             parts
           }],
           generationConfig: {
-            responseModalities: ['Image'] // Capital I is required
+            responseModalities: ['Text', 'Image']
           }
         };
 
@@ -190,8 +190,8 @@ export async function editImage(
     throw new Error('GEMINI_API_KEY not configured');
   }
 
-  const modelName = (params.model || '').trim() || 'gemini-2.5-flash-image';
-  const isNanoBanana = /flash|gemini/i.test(modelName);
+  const modelName = (params.model || '').trim() || 'gemini-3.1-flash-image-preview';
+  const isNanoBanana = /gemini/i.test(modelName);
 
   try {
     return await retryWithBackoff(async () => {
