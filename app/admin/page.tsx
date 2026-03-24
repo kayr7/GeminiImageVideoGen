@@ -569,11 +569,9 @@ export default function AdminPage() {
       );
 
       let updatedUsers = [...users];
-      let succeeded = 0;
       let failed = 0;
       results.forEach((result) => {
         if (result.status === 'fulfilled') {
-          succeeded++;
           const { id, tags } = result.value;
           updatedUsers = updatedUsers.map((u) => (u.id === id ? { ...u, tags } : u));
         } else {
