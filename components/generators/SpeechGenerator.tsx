@@ -11,6 +11,7 @@ import QuotaDisplay from './QuotaDisplay';
 import { CONSTANTS } from '@/lib/utils/constants';
 import { useAuth } from '@/lib/context/AuthContext';
 import { apiFetch, resolveApiUrl } from '@/lib/utils/apiClient';
+import { downloadFromUrl, getApiErrorMessage } from '@/lib/utils/files';
 import type { ModelInfo } from '@/types';
 
 export default function SpeechGenerator() {
@@ -114,16 +115,9 @@ export default function SpeechGenerator() {
     setGeneratedAudio(null);
 
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-
       const response = await apiFetch('/api/speech/generate', {
         method: 'POST',
-        headers,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text,
           model: model || undefined,
@@ -136,7 +130,7 @@ export default function SpeechGenerator() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.detail || data.error?.message || 'Failed to generate speech');
+        throw new Error(getApiErrorMessage(data, 'Failed to generate speech'));
       }
 
       // Handle audio data
@@ -157,12 +151,7 @@ export default function SpeechGenerator() {
   const handleDownload = () => {
     if (!generatedAudio) return;
 
-    const link = document.createElement('a');
-    link.href = generatedAudio;
-    link.download = `generated-speech-${Date.now()}.wav`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadFromUrl(generatedAudio, `generated-speech-${Date.now()}.wav`);
   };
 
   if (initialising) {

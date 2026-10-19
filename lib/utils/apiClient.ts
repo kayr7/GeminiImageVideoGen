@@ -66,8 +66,6 @@ let resolvedBase: string | null = null;
 
 const shouldRetry = (status: number): boolean => RETRYABLE_STATUSES.has(status);
 
-export const getApiBaseCandidates = (): readonly string[] => baseCandidates;
-
 export const resolveApiUrl = (path: string): string => {
   if (hasUrlScheme(path)) {
     return path;

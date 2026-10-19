@@ -1,6 +1,5 @@
 """Pydantic models for request/response validation."""
 
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
@@ -24,15 +23,6 @@ class ImageEditRequest(BaseModel):
     maskImage: Optional[str] = None
 
 
-class ImageResponse(BaseModel):
-    imageUrl: Optional[str] = None
-    imageData: Optional[str] = None
-    prompt: str
-    model: str
-    generatedAt: datetime
-    mediaId: Optional[str] = None
-
-
 # Video Generation Models
 class VideoGenerationRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=10000)
@@ -52,34 +42,7 @@ class VideoAnimateRequest(BaseModel):
     negativePrompt: Optional[str] = None
 
 
-class VideoResponse(BaseModel):
-    videoUrl: Optional[str] = None
-    videoData: Optional[str] = None
-    jobId: Optional[str] = None
-    status: str  # 'completed', 'processing', 'failed'
-    progress: Optional[int] = None
-    estimatedCompletion: Optional[datetime] = None
-    mediaId: Optional[str] = None
-    error: Optional[str] = None
-    firstFrameData: Optional[str] = None  # Base64 encoded first frame image
-    lastFrameData: Optional[str] = None  # Base64 encoded last frame image
-
-
 # Music Generation Models
-class MusicGenerationRequest(BaseModel):
-    description: str = Field(..., min_length=1, max_length=500)
-    duration: Optional[int] = Field(default=30, ge=10, le=60)
-    style: Optional[str] = None
-
-
-class MusicResponse(BaseModel):
-    audioUrl: Optional[str] = None
-    audioData: Optional[str] = None
-    description: str
-    generatedAt: datetime
-    error: Optional[str] = None
-
-
 # Speech Generation Models
 class SpeakerConfig(BaseModel):
     name: str = Field(..., min_length=1)
@@ -94,41 +57,11 @@ class SpeechGenerationRequest(BaseModel):
     model: Optional[str] = Field(default="gemini-2.5-flash-preview-tts")
 
 
-class SpeechResponse(BaseModel):
-    audioUrl: Optional[str] = None
-    audioData: Optional[str] = None
-    text: str
-    voice: str
-    language: Optional[str] = None
-    model: str
-    generatedAt: datetime
-    mediaId: Optional[str] = None
-
-
 # Media Storage Models
-class MediaMetadata(BaseModel):
-    id: str
-    type: str  # 'image', 'video', or 'audio'
-    filename: str
-    prompt: str
-    model: str
-    userId: str
-    createdAt: datetime
-    fileSize: int
-    mimeType: str
-    details: Optional[Dict[str, Any]] = None
-
-
 # Generic Response Models
 class SuccessResponse(BaseModel):
     success: bool = True
     data: dict = {}
-
-
-class ErrorResponse(BaseModel):
-    success: bool = False
-    error: str
-    details: Optional[List[str]] = None
 
 
 # Authentication Models
@@ -305,22 +238,6 @@ class TextGenerationRequest(BaseModel):
     model: Optional[str] = Field(default="gemini-2.0-flash-exp")
 
 
-class TextGenerationResponse(BaseModel):
-    id: str
-    userId: str
-    mode: str
-    systemPrompt: Optional[str]
-    systemPromptId: Optional[str]
-    userMessage: str
-    templateId: Optional[str]
-    filledMessage: str
-    variableValues: Optional[Dict[str, str]]
-    modelResponse: str
-    model: str
-    ipAddress: Optional[str]
-    createdAt: str
-
-
 class CreateChatSessionRequest(BaseModel):
     name: Optional[str] = None
     systemPrompt: Optional[str] = None
@@ -332,24 +249,8 @@ class UpdateChatSessionRequest(BaseModel):
     system_prompt: Optional[str] = Field(None, alias="systemPrompt")
 
 
-class ChatSessionResponse(BaseModel):
-    id: str
-    userId: str
-    name: Optional[str]
-    systemPrompt: Optional[str]
-    systemPromptId: Optional[str]
-    createdAt: str
-    updatedAt: str
-
-
 class SendMessageRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=10000)
     model: Optional[str] = Field(default="gemini-2.0-flash-exp")
 
 
-class ChatMessageResponse(BaseModel):
-    id: str
-    sessionId: str
-    role: str
-    content: str
-    createdAt: str

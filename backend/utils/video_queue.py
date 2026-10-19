@@ -8,6 +8,18 @@ from typing import Any, Dict, List, Optional
 from utils.database import get_connection, initialize_database
 
 
+# API field name -> column. Video bytes are intentionally NOT persisted here:
+# the finished video lives in the media store and jobs only reference its mediaId.
+_UPDATABLE_COLUMNS = {
+    "status": "status",
+    "prompt": "prompt",
+    "model": "model",
+    "mode": "mode",
+    "error": "error",
+    "mediaId": "media_id",
+}
+
+
 class VideoQueue:
     """Persist video generation job state in SQLite."""
 
@@ -34,9 +46,8 @@ class VideoQueue:
             "progress": row["progress"],
             "error": row["error"],
             "details": details,
-            "videoUrl": row["video_url"],
-            "videoData": row["video_data"],
             "mediaId": row["media_id"],
+            "ipAddress": row["ip_address"],
             "createdAt": datetime.fromisoformat(row["created_at"]),
             "updatedAt": datetime.fromisoformat(row["updated_at"]),
         }
@@ -62,9 +73,9 @@ class VideoQueue:
                 """
                 INSERT OR REPLACE INTO video_jobs (
                     id, job_id, operation_id, user_id, prompt, model, mode,
-                    status, progress, error, details, video_url, video_data,
-                    media_id, created_at, updated_at, completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    status, progress, error, details,
+                    media_id, ip_address, created_at, updated_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     internal_id,
@@ -78,9 +89,8 @@ class VideoQueue:
                     int(data.get("progress", 0)),
                     data.get("error"),
                     details_json,
-                    data.get("videoUrl"),
-                    data.get("videoData"),
                     data.get("mediaId"),
+                    data.get("ipAddress"),
                     now,
                     now,
                     None,
@@ -108,18 +118,8 @@ class VideoQueue:
             if key == "details":
                 fields.append("details = ?")
                 values.append(json.dumps(value) if value is not None else None)
-            elif key in {"status", "prompt", "model", "mode", "error", "videoUrl", "videoData", "mediaId"}:
-                column = {
-                    "status": "status",
-                    "prompt": "prompt",
-                    "model": "model",
-                    "mode": "mode",
-                    "error": "error",
-                    "videoUrl": "video_url",
-                    "videoData": "video_data",
-                    "mediaId": "media_id",
-                }[key]
-                fields.append(f"{column} = ?")
+            elif key in _UPDATABLE_COLUMNS:
+                fields.append(f"{_UPDATABLE_COLUMNS[key]} = ?")
                 values.append(value)
             elif key == "progress":
                 fields.append("progress = ?")
@@ -167,7 +167,7 @@ class VideoQueue:
         return self._row_to_job(row) if row else None
 
     def list_jobs(self, user_id: str) -> List[Dict[str, Any]]:
-        """List all jobs for a user ordered by creation time."""
+        """List all jobs for a user, newest first (timestamps as ISO strings)."""
         with get_connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM video_jobs WHERE user_id = ? ORDER BY datetime(created_at) DESC",
@@ -176,7 +176,6 @@ class VideoQueue:
 
         jobs = [self._row_to_job(row) for row in rows]
 
-        # Convert datetimes to ISO strings for API responses
         for job in jobs:
             job["createdAt"] = job["createdAt"].isoformat()
             job["updatedAt"] = job["updatedAt"].isoformat()

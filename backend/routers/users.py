@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, status, Depends
-from typing import List
 
 from models import (
     BulkCreateUsersRequest,
     UpdateUserRequest,
-    UpdateQuotasRequest,
     UpdateUserTagsRequest,
-    UserResponse,
-    QuotaResponse,
     SuccessResponse,
     LoginUser,
 )
-from utils.auth import require_admin, get_current_user
+from utils.auth import require_admin
 from utils.user_manager import UserManager
 from utils.quota_manager import QuotaManager
 

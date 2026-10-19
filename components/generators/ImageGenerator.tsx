@@ -13,6 +13,7 @@ import TemplateSelector from '../shared/TemplateSelector';
 import { CONSTANTS } from '@/lib/utils/constants';
 import { useAuth } from '@/lib/context/AuthContext';
 import { apiFetch, resolveApiUrl } from '@/lib/utils/apiClient';
+import { downloadFromUrl, getApiErrorMessage } from '@/lib/utils/files';
 import type { ModelInfo } from '@/types';
 
 export default function ImageGenerator() {
@@ -109,16 +110,9 @@ export default function ImageGenerator() {
     setGeneratedImage(null);
 
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-
       const response = await apiFetch('/api/image/generate', {
         method: 'POST',
-        headers,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt,
           model: model || undefined,
@@ -131,7 +125,7 @@ export default function ImageGenerator() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.detail || data.error?.message || 'Failed to generate image');
+        throw new Error(getApiErrorMessage(data, 'Failed to generate image'));
       }
 
       // Handle image data
@@ -152,12 +146,7 @@ export default function ImageGenerator() {
   const handleDownload = () => {
     if (!generatedImage) return;
 
-    const link = document.createElement('a');
-    link.href = generatedImage;
-    link.download = `generated-image-${Date.now()}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadFromUrl(generatedImage, `generated-image-${Date.now()}.png`);
   };
 
   if (initialising) {

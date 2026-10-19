@@ -1,6 +1,7 @@
 """Media storage system for saving images and videos to disk."""
 
 import base64
+import logging
 import json
 import uuid
 from datetime import datetime
@@ -8,6 +9,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from utils.database import get_connection, initialize_database
+
+logger = logging.getLogger(__name__)
 
 # Storage configuration
 STORAGE_ROOT = Path(__file__).parent.parent / ".media-storage"
@@ -129,9 +132,7 @@ class MediaStorage:
             )
             conn.commit()
 
-        print(
-            f"Saved {media_type} to disk: {filename} ({len(file_bytes) / 1024 / 1024:.2f} MB)"
-        )
+        logger.info("Saved %s to disk: %s (%.2f MB)", media_type, filename, len(file_bytes) / 1024 / 1024)
 
         return media_id
 
@@ -142,8 +143,8 @@ class MediaStorage:
             file_bytes = base64.b64decode(base64_data)
             thumbnail_path.write_bytes(file_bytes)
             return True
-        except Exception as e:
-            print(f"Failed to save thumbnail: {e}")
+        except Exception:
+            logger.exception("Failed to save thumbnail for %s", media_id)
             return False
 
     def get_media(self, media_id: str) -> dict:
@@ -168,7 +169,7 @@ class MediaStorage:
             file_path = IMAGES_DIR / media_meta["filename"]
 
         if not file_path.exists():
-            print(f"Media file not found: {file_path}")
+            logger.warning("Media file not found: %s", file_path)
             return None
 
         # Read file
@@ -235,8 +236,8 @@ class MediaStorage:
         try:
             if file_path.exists():
                 file_path.unlink()
-        except Exception as e:
-            print(f"Error deleting media file {file_path}: {e}")
+        except Exception:
+            logger.exception("Error deleting media file %s", file_path)
             raise
 
         with get_connection() as conn:

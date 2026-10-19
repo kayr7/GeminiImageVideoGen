@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from models import (
     LoginRequest,
@@ -156,10 +156,13 @@ async def set_password(request: SetPasswordRequest) -> LoginResponse:
 
 
 @router.post("/logout", response_model=SuccessResponse)
-async def logout(user: LoginUser = Depends(get_current_user)) -> SuccessResponse:
+def logout(
+    user: LoginUser = Depends(get_current_user),
+    authorization: str = Header(),
+) -> SuccessResponse:
     """Logout and invalidate session."""
-    # Note: We'd need the token to invalidate it, but for now just return success
-    # The frontend should discard the token
+    # get_current_user has already validated the "Bearer <token>" format.
+    session_manager.invalidate(authorization.split(" ", 1)[1].strip())
     return SuccessResponse(success=True, data={"message": "Logged out successfully"})
 
 

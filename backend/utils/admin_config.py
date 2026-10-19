@@ -34,8 +34,15 @@ def _load_raw_config() -> Dict[str, Any]:
 
 def _write_raw_config(payload: Dict[str, Any]) -> None:
     _ensure_directory(_CONFIG_PATH)
-    with _CONFIG_PATH.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, sort_keys=True)
+    tmp_path = _CONFIG_PATH.with_name(f"{_CONFIG_PATH.name}.{os.getpid()}.tmp")
+    try:
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, _CONFIG_PATH)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def get_admin_model_settings() -> Dict[str, Any]:

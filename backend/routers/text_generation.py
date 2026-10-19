@@ -1,39 +1,32 @@
 """API routes for text generation and chat sessions."""
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+import logging
 from typing import Tuple
 
 from models import (
     TextGenerationRequest,
-    TextGenerationResponse,
     CreateChatSessionRequest,
     UpdateChatSessionRequest,
-    ChatSessionResponse,
     SendMessageRequest,
-    ChatMessageResponse,
     SuccessResponse,
     LoginUser,
 )
+from utils.gemini import get_client_ip
 from utils.auth import get_current_user_with_db
 from utils.text_generation_manager import TextGenerationManager
 from utils.chat_session_manager import ChatSessionManager
 from utils.user_manager import User
 from utils.quota_manager import QuotaManager
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
-
-
-def get_client_ip(request: Request) -> str:
-    """Extract client IP address from request."""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
 
 
 # Text Generation Routes
 @router.post("/generate", response_model=SuccessResponse)
-async def generate_text(
+def generate_text(
     request_body: TextGenerationRequest,
     request: Request,
     auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
@@ -65,12 +58,15 @@ async def generate_text(
 
         return SuccessResponse(success=True, data={"generation": generation.to_dict()})
 
+    except HTTPException:
+        raise
     except Exception as e:
+        logger.exception("Text generation failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/history", response_model=SuccessResponse)
-async def get_generation_history(
+def get_generation_history(
     auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
 ):
     """Get text generation history for the current user."""
@@ -84,7 +80,7 @@ async def get_generation_history(
 
 
 @router.get("/history/{generation_id}", response_model=SuccessResponse)
-async def get_generation(
+def get_generation(
     generation_id: str,
     auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
 ):
@@ -99,7 +95,7 @@ async def get_generation(
 
 
 @router.delete("/history/{generation_id}", response_model=SuccessResponse)
-async def delete_generation(
+def delete_generation(
     generation_id: str,
     auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
 ):
@@ -115,7 +111,7 @@ async def delete_generation(
 
 # Chat Session Routes
 @router.post("/chat/sessions", response_model=SuccessResponse)
-async def create_chat_session(
+def create_chat_session(
     request_body: CreateChatSessionRequest,
     auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
 ):
@@ -133,7 +129,7 @@ async def create_chat_session(
 
 
 @router.get("/chat/sessions", response_model=SuccessResponse)
-async def list_chat_sessions(
+def list_chat_sessions(
     auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
 ):
     """List all chat sessions for the current user."""
@@ -147,7 +143,7 @@ async def list_chat_sessions(
 
 
 @router.get("/chat/sessions/{session_id}", response_model=SuccessResponse)
-async def get_chat_session(
+def get_chat_session(
     session_id: str,
     auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
 ):
@@ -162,7 +158,7 @@ async def get_chat_session(
 
 
 @router.put("/chat/sessions/{session_id}", response_model=SuccessResponse)
-async def update_chat_session(
+def update_chat_session(
     session_id: str,
     request_body: UpdateChatSessionRequest,
     auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
@@ -193,7 +189,7 @@ async def update_chat_session(
 
 
 @router.delete("/chat/sessions/{session_id}", response_model=SuccessResponse)
-async def delete_chat_session(
+def delete_chat_session(
     session_id: str,
     auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
 ):
@@ -208,7 +204,7 @@ async def delete_chat_session(
 
 
 @router.get("/chat/sessions/{session_id}/messages", response_model=SuccessResponse)
-async def get_chat_messages(
+def get_chat_messages(
     session_id: str,
     auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
 ):
@@ -223,7 +219,7 @@ async def get_chat_messages(
 
 
 @router.post("/chat/sessions/{session_id}/messages", response_model=SuccessResponse)
-async def send_chat_message(
+def send_chat_message(
     session_id: str,
     request_body: SendMessageRequest,
     auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
@@ -250,8 +246,11 @@ async def send_chat_message(
 
         return SuccessResponse(success=True, data={"message": model_message.to_dict()})
 
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        logger.exception("Chat message failed (session=%s)", session_id)
         raise HTTPException(status_code=500, detail=str(e))
 

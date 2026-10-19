@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuth } from '@/lib/context/AuthContext';
+import { useRequireAuth } from '@/lib/hooks/useRequireAuth';
+import { formatDateTime } from '@/lib/utils/files';
 import { apiFetch } from '@/lib/utils/apiClient';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -34,8 +34,7 @@ interface Generation {
 }
 
 export default function ProfilePage() {
-  const router = useRouter();
-  const { token, initialising } = useAuth();
+  const { initialising, ready } = useRequireAuth('/profile');
   const [loading, setLoading] = useState(true);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const [generations, setGenerations] = useState<Generation[]>([]);
@@ -51,15 +50,11 @@ export default function ProfilePage() {
   const [passwordChangeSuccess, setPasswordChangeSuccess] = useState(false);
 
   useEffect(() => {
-    if (!initialising && !token) {
-      router.push('/login?redirect=/profile');
-      return;
-    }
-
-    if (!initialising && token) {
+    if (ready) {
       loadProfileData();
     }
-  }, [initialising, token, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
 
   const loadProfileData = async () => {
     try {
@@ -399,7 +394,7 @@ export default function ProfilePage() {
                         {gen.model}
                       </p>
                       <span className="text-xs text-gray-500 dark:text-gray-400">
-                        {new Date(gen.createdAt).toLocaleString()}
+                        {formatDateTime(gen.createdAt)}
                       </span>
                     </div>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mt-2 line-clamp-2">

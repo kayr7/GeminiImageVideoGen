@@ -4,9 +4,13 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '@/lib/context/AuthContext';
 import LoadingSpinner from '@/components/shared/LoadingSpinner';
 import Button from '@/components/ui/Button';
-import Input from '@/components/ui/Input';
 import Textarea from '@/components/ui/Textarea';
-import Select from '@/components/ui/Select';
+import ChatSessionList from '@/components/text/ChatSessionList';
+import LibrarySelector from '@/components/text/LibrarySelector';
+import MessageList from '@/components/text/MessageList';
+import SaveLibraryModal from '@/components/text/SaveLibraryModal';
+import VariableInputs from '@/components/text/VariableInputs';
+import { formatDateTime } from '@/lib/utils/files';
 import { templateAPI, systemPromptAPI, textGenerationAPI, chatAPI } from '@/lib/text/api';
 import { extractVariables, isTemplateFilled, getUnfilledVariables } from '@/lib/text/utils';
 import type {
@@ -51,17 +55,11 @@ export default function TextGenerationPage() {
   // Modal state
   const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
   const [showSaveSystemPromptModal, setShowSaveSystemPromptModal] = useState(false);
-  const [saveTemplateName, setSaveTemplateName] = useState('');
-  const [saveSystemPromptName, setSaveSystemPromptName] = useState('');
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [savingSystemPrompt, setSavingSystemPrompt] = useState(false);
 
-  // Session management state
-  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-  const [editingSessionName, setEditingSessionName] = useState('');
-
   // Compute if system prompt can be edited (no messages sent yet)
-  const canEditSystemPrompt = useMemo(() => messages.length === 0, [messages]);
+  const canEditSystemPrompt = messages.length === 0;
 
   // Extract variables from user message
   const detectedVariables = useMemo(() => extractVariables(userMessage), [userMessage]);
@@ -100,8 +98,7 @@ export default function TextGenerationPage() {
         setTemplates(templatesData);
         setSystemPrompts(promptsData);
       } catch (err) {
-        console.error('Failed to load libraries:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load libraries');
+                setError(err instanceof Error ? err.message : 'Failed to load libraries');
       } finally {
         setLoadingLibraries(false);
       }
@@ -119,8 +116,8 @@ export default function TextGenerationPage() {
       try {
         const sessions = await chatAPI.listSessions();
         setChatSessions(sessions);
-      } catch (err) {
-        console.error('Failed to load sessions:', err);
+      } catch {
+        // Non-critical: the session list simply stays empty
       } finally {
         setLoadingSessions(false);
       }
@@ -142,8 +139,7 @@ export default function TextGenerationPage() {
         const msgs = await chatAPI.getMessages(currentSession.id);
         setMessages(msgs);
       } catch (err) {
-        console.error('Failed to load messages:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load messages');
+                setError(err instanceof Error ? err.message : 'Failed to load messages');
       } finally {
         setLoadingMessages(false);
       }
@@ -151,6 +147,10 @@ export default function TextGenerationPage() {
 
     void loadMessages();
   }, [currentSession]);
+
+  const handleVariableChange = useCallback((variable: string, value: string) => {
+    setVariableValues(prev => ({ ...prev, [variable]: value }));
+  }, []);
 
   // Handle template selection
   const handleTemplateSelect = useCallback((templateId: string) => {
@@ -225,7 +225,7 @@ export default function TextGenerationPage() {
 
     try {
       const session = await chatAPI.createSession({
-        name: `Chat ${new Date().toLocaleString()}`,
+        name: `Chat ${formatDateTime(new Date())}`,
         systemPrompt: systemPromptText || undefined,
         systemPromptId: selectedSystemPrompt?.id,
       });
@@ -282,40 +282,25 @@ export default function TextGenerationPage() {
   };
 
   // Handle renaming session
-  const handleStartRename = (session: ChatSession) => {
-    setEditingSessionId(session.id);
-    setEditingSessionName(session.name || '');
-  };
-
-  const handleSaveRename = async (sessionId: string) => {
-    if (!editingSessionName.trim()) {
+  const handleRenameSession = async (sessionId: string, name: string): Promise<boolean> => {
+    if (!name.trim()) {
       setError('Session name cannot be empty');
-      return;
+      return false;
     }
 
     try {
-      const updatedSession = await chatAPI.updateSession(sessionId, {
-        name: editingSessionName,
-      });
+      const updatedSession = await chatAPI.updateSession(sessionId, { name });
 
-      setChatSessions(prev =>
-        prev.map(s => (s.id === sessionId ? updatedSession : s))
-      );
+      setChatSessions(prev => prev.map(s => (s.id === sessionId ? updatedSession : s)));
 
       if (currentSession?.id === sessionId) {
         setCurrentSession(updatedSession);
       }
-
-      setEditingSessionId(null);
-      setEditingSessionName('');
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to rename session');
+      return false;
     }
-  };
-
-  const handleCancelRename = () => {
-    setEditingSessionId(null);
-    setEditingSessionName('');
   };
 
   // Handle deleting session
@@ -363,8 +348,8 @@ export default function TextGenerationPage() {
   };
 
   // Handle saving template
-  const handleSaveTemplate = async () => {
-    if (!saveTemplateName.trim()) {
+  const handleSaveTemplate = async (name: string) => {
+    if (!name.trim()) {
       setError('Please enter a template name');
       return;
     }
@@ -379,7 +364,7 @@ export default function TextGenerationPage() {
 
     try {
       const newTemplate = await templateAPI.create({
-        name: saveTemplateName,
+        name,
         mediaType: 'text',
         templateText: userMessage,
         variables: detectedVariables,
@@ -388,7 +373,6 @@ export default function TextGenerationPage() {
       setTemplates(prev => [newTemplate, ...prev]);
       setSelectedTemplate(newTemplate);
       setShowSaveTemplateModal(false);
-      setSaveTemplateName('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save template');
     } finally {
@@ -419,8 +403,8 @@ export default function TextGenerationPage() {
   };
 
   // Handle saving system prompt
-  const handleSaveSystemPrompt = async () => {
-    if (!saveSystemPromptName.trim()) {
+  const handleSaveSystemPrompt = async (name: string) => {
+    if (!name.trim()) {
       setError('Please enter a system prompt name');
       return;
     }
@@ -435,7 +419,7 @@ export default function TextGenerationPage() {
 
     try {
       const newPrompt = await systemPromptAPI.create({
-        name: saveSystemPromptName,
+        name,
         mediaType: 'text',
         promptText: systemPromptText,
       });
@@ -443,7 +427,6 @@ export default function TextGenerationPage() {
       setSystemPrompts(prev => [newPrompt, ...prev]);
       setSelectedSystemPrompt(newPrompt);
       setShowSaveSystemPromptModal(false);
-      setSaveSystemPromptName('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save system prompt');
     } finally {
@@ -546,168 +529,44 @@ export default function TextGenerationPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Sidebar - Libraries and Sessions */}
         <div className="space-y-6">
-          {/* System Prompt Selector */}
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-3">System Prompt</h3>
-            {loadingLibraries ? (
-              <div className="text-sm text-gray-500 dark:text-gray-400">Loading...</div>
-            ) : (
-              <>
-                <Select
-                  value={selectedSystemPrompt?.id || ''}
-                  onChange={(e) => handleSystemPromptSelect(e.target.value)}
-                  options={[
-                    { value: '', label: '-- None --' },
-                    ...systemPrompts.map(p => ({ value: p.id, label: p.name })),
-                  ]}
-                  className="mb-2"
-                  aria-label="Select system prompt"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowSaveSystemPromptModal(true)}
-                  className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                  disabled={!systemPromptText.trim()}
-                >
-                  💾 Save Current as New
-                </button>
-                {selectedSystemPrompt && (
-                  <button
-                    type="button"
-                    onClick={() => void handleUpdateSystemPrompt()}
-                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline ml-4"
-                    disabled={loading}
-                  >
-                    ✏️ Update &quot;{selectedSystemPrompt.name}&quot;
-                  </button>
-                )}
-              </>
-            )}
-          </div>
+          <LibrarySelector
+            title="System Prompt"
+            ariaLabel="Select system prompt"
+            items={systemPrompts}
+            selected={selectedSystemPrompt}
+            loadingItems={loadingLibraries}
+            busy={loading}
+            canSaveNew={!!systemPromptText.trim()}
+            onSelect={handleSystemPromptSelect}
+            onSaveNew={() => setShowSaveSystemPromptModal(true)}
+            onUpdate={() => void handleUpdateSystemPrompt()}
+          />
 
-          {/* Template Selector */}
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Template</h3>
-            {loadingLibraries ? (
-              <div className="text-sm text-gray-500 dark:text-gray-400">Loading...</div>
-            ) : (
-              <>
-                <Select
-                  value={selectedTemplate?.id || ''}
-                  onChange={(e) => handleTemplateSelect(e.target.value)}
-                  options={[
-                    { value: '', label: '-- None --' },
-                    ...templates.map(t => ({ value: t.id, label: t.name })),
-                  ]}
-                  className="mb-2"
-                  aria-label="Select template"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowSaveTemplateModal(true)}
-                  className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                  disabled={!userMessage.trim()}
-                >
-                  💾 Save Current as New
-                </button>
-                {selectedTemplate && (
-                  <button
-                    type="button"
-                    onClick={() => void handleUpdateTemplate()}
-                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline ml-4"
-                    disabled={loading}
-                  >
-                    ✏️ Update &quot;{selectedTemplate.name}&quot;
-                  </button>
-                )}
-              </>
-            )}
-          </div>
+          <LibrarySelector
+            title="Template"
+            ariaLabel="Select template"
+            items={templates}
+            selected={selectedTemplate}
+            loadingItems={loadingLibraries}
+            busy={loading}
+            canSaveNew={!!userMessage.trim()}
+            onSelect={handleTemplateSelect}
+            onSaveNew={() => setShowSaveTemplateModal(true)}
+            onUpdate={() => void handleUpdateTemplate()}
+          />
 
           {/* Chat Sessions (only in chat mode) */}
           {mode === 'chat' && (
-            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-gray-900 dark:text-white">Chat Sessions</h3>
-                <button
-                  type="button"
-                  onClick={() => void handleCreateSession()}
-                  className="text-sm bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
-                  disabled={loading}
-                >
-                  + New
-                </button>
-              </div>
-              {loadingSessions ? (
-                <div className="text-sm text-gray-500 dark:text-gray-400">Loading...</div>
-              ) : chatSessions.length === 0 ? (
-                <div className="text-sm text-gray-500 dark:text-gray-400">
-                  No sessions yet. Create one to start chatting!
-                </div>
-              ) : (
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {chatSessions.map(session => (
-                    <div
-                      key={session.id}
-                      className={`px-3 py-2 rounded text-sm transition-colors ${
-                        currentSession?.id === session.id
-                          ? 'bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-blue-100'
-                          : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300'
-                      }`}
-                    >
-                      {editingSessionId === session.id ? (
-                        <div className="flex items-center gap-2">
-                          <Input
-                            value={editingSessionName}
-                            onChange={(e) => setEditingSessionName(e.target.value)}
-                            className="flex-1 text-sm"
-                            placeholder="Session name"
-                          />
-                          <button
-                            onClick={() => handleSaveRename(session.id)}
-                            className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs"
-                          >
-                            ✓
-                          </button>
-                          <button
-                            onClick={handleCancelRename}
-                            className="px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 text-xs"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-between gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setCurrentSession(session)}
-                            className="flex-1 text-left"
-                          >
-                            {session.name || 'Untitled Chat'}
-                          </button>
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => handleStartRename(session)}
-                              className="p-1 text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                              title="Rename"
-                            >
-                              ✏️
-                            </button>
-                            <button
-                              onClick={() => handleDeleteSession(session.id)}
-                              className="p-1 text-gray-500 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                              title="Delete"
-                            >
-                              🗑️
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            <ChatSessionList
+              sessions={chatSessions}
+              currentId={currentSession?.id}
+              loadingSessions={loadingSessions}
+              busy={loading}
+              onSelect={setCurrentSession}
+              onCreate={() => void handleCreateSession()}
+              onRename={handleRenameSession}
+              onDelete={handleDeleteSession}
+            />
           )}
         </div>
 
@@ -762,38 +621,7 @@ export default function TextGenerationPage() {
                 </div>
               ) : (
                 <>
-                  {/* Messages */}
-                  <div className="space-y-4 mb-6 max-h-96 overflow-y-auto">
-                    {loadingMessages ? (
-                      <div className="text-center text-gray-500 dark:text-gray-400">
-                        Loading messages...
-                      </div>
-                    ) : messages.length === 0 ? (
-                      <div className="text-center text-gray-500 dark:text-gray-400">
-                        No messages yet. Start the conversation!
-                      </div>
-                    ) : (
-                      messages.map((msg) => (
-                        <div
-                          key={msg.id}
-                          className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                        >
-                          <div
-                            className={`max-w-[80%] rounded-lg px-4 py-2 ${
-                              msg.role === 'user'
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white'
-                            }`}
-                          >
-                            <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                            <p className="text-xs opacity-70 mt-1">
-                              {new Date(msg.createdAt).toLocaleTimeString()}
-                            </p>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
+                  <MessageList messages={messages} loading={loadingMessages} />
 
                   {/* Message Input */}
                   <div>
@@ -810,30 +638,11 @@ export default function TextGenerationPage() {
                         }
                       }}
                     />
-                    {detectedVariables.length > 0 && (
-                      <div className="mt-4 space-y-2">
-                        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                          Template Variables:
-                        </h4>
-                        <div className="grid grid-cols-2 gap-3">
-                          {detectedVariables.map(variable => (
-                            <div key={variable}>
-                              <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
-                                {variable}:
-                              </label>
-                              <Input
-                                value={variableValues[variable] || ''}
-                                onChange={(e) => setVariableValues(prev => ({
-                                  ...prev,
-                                  [variable]: e.target.value,
-                                }))}
-                                placeholder={`Enter ${variable}`}
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    <VariableInputs
+                      variables={detectedVariables}
+                      values={variableValues}
+                      onChange={handleVariableChange}
+                    />
                     <Button
                       onClick={() => void handleSendMessage()}
                       disabled={loading || !userMessage.trim()}
@@ -863,31 +672,11 @@ export default function TextGenerationPage() {
                   disabled={loading}
                 />
 
-                {/* Variable Inputs */}
-                {detectedVariables.length > 0 && (
-                  <div className="mt-4 space-y-2">
-                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                      Template Variables:
-                    </h4>
-                    <div className="grid grid-cols-2 gap-3">
-                      {detectedVariables.map(variable => (
-                        <div key={variable}>
-                          <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
-                            {variable}:
-                          </label>
-                          <Input
-                            value={variableValues[variable] || ''}
-                            onChange={(e) => setVariableValues(prev => ({
-                              ...prev,
-                              [variable]: e.target.value,
-                            }))}
-                            placeholder={`Enter ${variable}`}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <VariableInputs
+                  variables={detectedVariables}
+                  values={variableValues}
+                  onChange={handleVariableChange}
+                    />
 
                 <Button
                   onClick={() => void handleGenerate()}
@@ -923,129 +712,48 @@ export default function TextGenerationPage() {
         </div>
       </div>
 
-      {/* Save Template Modal */}
       {showSaveTemplateModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6 max-w-md w-full">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Save Template
-            </h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Template Name
-                </label>
-                <Input
-                  value={saveTemplateName}
-                  onChange={(e) => setSaveTemplateName(e.target.value)}
-                  placeholder="e.g., Formal Email Template"
-                  disabled={savingTemplate}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Template Text (Preview)
-                </label>
-                <Textarea
-                  value={userMessage}
-                  readOnly
-                  rows={4}
-                  className="bg-gray-50 dark:bg-gray-800"
-                />
-              </div>
-              {detectedVariables.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Detected Variables
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    {detectedVariables.map(v => (
-                      <span
-                        key={v}
-                        className="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded text-sm"
-                      >
-                        {'{{'}{v}{'}}'}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div className="flex gap-3">
-                <Button
-                  onClick={() => void handleSaveTemplate()}
-                  disabled={savingTemplate || !saveTemplateName.trim()}
-                  className="flex-1"
-                >
-                  {savingTemplate ? 'Saving...' : 'Save'}
-                </Button>
-                <Button
-                  onClick={() => {
-                    setShowSaveTemplateModal(false);
-                    setSaveTemplateName('');
-                  }}
-                  disabled={savingTemplate}
-                  className="flex-1 bg-gray-500 hover:bg-gray-600"
-                >
-                  Cancel
-                </Button>
+        <SaveLibraryModal
+          title="Save Template"
+          nameLabel="Template Name"
+          namePlaceholder="e.g., Formal Email Template"
+          previewLabel="Template Text (Preview)"
+          previewText={userMessage}
+          saving={savingTemplate}
+          onSave={(name) => void handleSaveTemplate(name)}
+          onCancel={() => setShowSaveTemplateModal(false)}
+        >
+          {detectedVariables.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Detected Variables
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {detectedVariables.map(v => (
+                  <span
+                    key={v}
+                    className="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded text-sm"
+                  >
+                    {'{{'}{v}{'}}'}
+                  </span>
+                ))}
               </div>
             </div>
-          </div>
-        </div>
+          )}
+        </SaveLibraryModal>
       )}
 
-      {/* Save System Prompt Modal */}
       {showSaveSystemPromptModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-6 max-w-md w-full">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-              Save System Prompt
-            </h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  System Prompt Name
-                </label>
-                <Input
-                  value={saveSystemPromptName}
-                  onChange={(e) => setSaveSystemPromptName(e.target.value)}
-                  placeholder="e.g., Professional Writer"
-                  disabled={savingSystemPrompt}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  System Prompt Text (Preview)
-                </label>
-                <Textarea
-                  value={systemPromptText}
-                  readOnly
-                  rows={4}
-                  className="bg-gray-50 dark:bg-gray-800"
-                />
-              </div>
-              <div className="flex gap-3">
-                <Button
-                  onClick={() => void handleSaveSystemPrompt()}
-                  disabled={savingSystemPrompt || !saveSystemPromptName.trim()}
-                  className="flex-1"
-                >
-                  {savingSystemPrompt ? 'Saving...' : 'Save'}
-                </Button>
-                <Button
-                  onClick={() => {
-                    setShowSaveSystemPromptModal(false);
-                    setSaveSystemPromptName('');
-                  }}
-                  disabled={savingSystemPrompt}
-                  className="flex-1 bg-gray-500 hover:bg-gray-600"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <SaveLibraryModal
+          title="Save System Prompt"
+          nameLabel="System Prompt Name"
+          namePlaceholder="e.g., Professional Writer"
+          previewLabel="System Prompt Text (Preview)"
+          previewText={systemPromptText}
+          saving={savingSystemPrompt}
+          onSave={(name) => void handleSaveSystemPrompt(name)}
+          onCancel={() => setShowSaveSystemPromptModal(false)}
+        />
       )}
     </div>
   );

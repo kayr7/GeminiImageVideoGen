@@ -301,9 +301,6 @@ export default function MediaGallery() {
         setActionError(null);
       const response = await apiFetch(`/api/media/${id}`, {
         method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
       });
 
         const payload = (await response.json()) as MediaListResponse;

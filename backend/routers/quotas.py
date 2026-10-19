@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException, status, Depends
 
 from models import (
     UpdateQuotasRequest,
-    QuotaResponse,
     SuccessResponse,
     LoginUser,
 )

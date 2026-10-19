@@ -2,10 +2,13 @@
 FastAPI Backend for Gemini Image/Video Generation
 """
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
+import logging
 import os
+from contextlib import asynccontextmanager
+
+from dotenv import load_dotenv
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from routers import (
     admin,
@@ -28,27 +31,53 @@ from utils.database import initialize_database
 # Load environment variables
 load_dotenv()
 
-# Verify API key is set
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 if not os.getenv("GEMINI_API_KEY"):
-    print("WARNING: GEMINI_API_KEY not found in environment variables")
+    logger.warning("GEMINI_API_KEY not found in environment variables")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize database and create the env-configured admin user on startup."""
+    logger.info("Initializing database...")
+    initialize_database()
+
+    admin_user = ensure_env_admin_exists()
+    if admin_user:
+        logger.info("Admin user initialized: %s", admin_user.email)
+    else:
+        logger.warning(
+            "No admin credentials found in .env - please set APP_USERNAME and APP_PASSWORD"
+        )
+
+    logger.info("Application startup complete")
+    yield
+
 
 app = FastAPI(
+    lifespan=lifespan,
     title="Gemini Media Generation API",
     description="Backend API for image and video generation using Google Gemini API",
     version="1.0.0",
     root_path=os.getenv("ROOT_PATH", ""),  # Support subpath deployment
 )
 
-# Configure CORS
+# Configure CORS. Auth uses Bearer tokens (no cookies), so credentials are not
+# needed; origins are configurable via CORS_ORIGINS (comma-separated, default "*").
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "*").split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://frontend:3000",
-        "*",  # Allow all origins for subpath deployment
-    ],
-    allow_credentials=True,
+    allow_origins=cors_origins or ["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -92,20 +121,3 @@ async def health_check():
         "gemini_api_key_configured": bool(os.getenv("GEMINI_API_KEY")),
     }
 
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database and create admin user on startup."""
-    print("Initializing database...")
-    initialize_database()
-
-    print("Ensuring admin user from .env exists...")
-    admin_user = ensure_env_admin_exists()
-    if admin_user:
-        print(f"✓ Admin user initialized: {admin_user.email}")
-    else:
-        print(
-            "⚠ No admin credentials found in .env - please set APP_USERNAME and APP_PASSWORD"
-        )
-
-    print("✓ Application startup complete")

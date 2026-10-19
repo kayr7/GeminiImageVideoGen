@@ -14,6 +14,7 @@ import TemplateSelector from '../shared/TemplateSelector';
 import { CONSTANTS } from '@/lib/utils/constants';
 import { useAuth } from '@/lib/context/AuthContext';
 import { apiFetch, resolveApiUrl } from '@/lib/utils/apiClient';
+import { downloadFromUrl, formatDateTime, getApiErrorMessage } from '@/lib/utils/files';
 import type { ModelInfo } from '@/types';
 
 type VideoJob = {
@@ -29,14 +30,6 @@ type VideoJob = {
 
 export default function VideoGenerator() {
   const { token, config, initialising } = useAuth();
-
-  const authHeaders = useMemo<Record<string, string>>(() => {
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-    return headers;
-  }, [token]);
 
   const videoModelAvailability = config?.models?.['video'];
   const availableVideoModels = useMemo<ModelInfo[]>(() => {
@@ -142,9 +135,7 @@ export default function VideoGenerator() {
       return;
     }
     try {
-      const response = await apiFetch('/api/video/jobs', {
-        headers: { ...authHeaders },
-      });
+      const response = await apiFetch('/api/video/jobs');
       const data = await response.json();
       if (data.success) {
         const jobs = Array.isArray(data.data?.jobs)
@@ -155,16 +146,14 @@ export default function VideoGenerator() {
     } catch (err) {
       console.error('Failed to load job history:', err);
     }
-  }, [token, authHeaders]);
+  }, [token]);
 
   const checkJobStatus = async (jobId: string) => {
     if (!token) {
       return undefined;
     }
     try {
-      const response = await apiFetch(`/api/video/jobs/${jobId}`, {
-        headers: { ...authHeaders },
-      });
+      const response = await apiFetch(`/api/video/jobs/${jobId}`);
       const data = await response.json();
       if (data.success && data.data) {
         const updatedJob = data.data as VideoJob;
@@ -189,60 +178,59 @@ export default function VideoGenerator() {
     }
   }, [initialising, loadJobHistory]);
 
+  const showCompletedVideo = (result: VideoJob & Record<string, string | undefined>) => {
+    const videoSrc = result.videoUrl
+      ? resolveApiUrl(result.videoUrl)
+      : result.videoData
+      ? `data:video/mp4;base64,${result.videoData}`
+      : null;
+    if (!videoSrc) {
+      return false;
+    }
+
+    setGeneratedVideo(videoSrc);
+    setStatusMessage('Video generation completed!');
+    if (result.firstFrameData) {
+      setFirstFrameExtracted(`data:image/jpeg;base64,${result.firstFrameData}`);
+    }
+    if (result.lastFrameData) {
+      setLastFrameExtracted(`data:image/jpeg;base64,${result.lastFrameData}`);
+    }
+    return true;
+  };
+
   const pollVideoStatus = async (jobId: string) => {
     const maxAttempts = 60; // 10 minutes max (60 attempts * 10 seconds)
-    let attempts = 0;
 
-    while (attempts < maxAttempts) {
-      try {
-        const response = await apiFetch(`/api/video/status?jobId=${encodeURIComponent(jobId)}`, {
-          headers: { ...authHeaders },
-        });
-        const data = await response.json();
+    for (let attempts = 0; attempts < maxAttempts; attempts++) {
+      const response = await apiFetch(`/api/video/status?jobId=${encodeURIComponent(jobId)}`);
+      const data = await response.json();
 
-        if (!response.ok) {
-          throw new Error(data.detail || data.error?.message || 'Failed to check video status');
-        }
-
-        if (data.data.status === 'completed') {
-          if (data.data.videoUrl) {
-            setGeneratedVideo(resolveApiUrl(data.data.videoUrl));
-            setStatusMessage('Video generation completed!');
-            
-            // Set extracted frames if available
-            if (data.data.firstFrameData) {
-              setFirstFrameExtracted(`data:image/jpeg;base64,${data.data.firstFrameData}`);
-            }
-            if (data.data.lastFrameData) {
-              setLastFrameExtracted(`data:image/jpeg;base64,${data.data.lastFrameData}`);
-            }
-            
-            return;
-          }
-          if (data.data.videoData) {
-            setGeneratedVideo(`data:video/mp4;base64,${data.data.videoData}`);
-            setStatusMessage('Video generation completed!');
-            
-            // Set extracted frames if available
-            if (data.data.firstFrameData) {
-              setFirstFrameExtracted(`data:image/jpeg;base64,${data.data.firstFrameData}`);
-            }
-            if (data.data.lastFrameData) {
-              setLastFrameExtracted(`data:image/jpeg;base64,${data.data.lastFrameData}`);
-            }
-            
-            return;
-          }
-        } else if (data.data.status === 'processing') {
-          setStatusMessage(`Processing video... (${attempts * 10}s elapsed)`);
-          await new Promise((resolve) => setTimeout(resolve, 10000));
-          attempts++;
-        } else if (data.data.status === 'failed') {
-          throw new Error(data.data.error || 'Video generation failed');
-        }
-      } catch (err) {
-        throw err;
+      if (!response.ok) {
+        throw new Error(getApiErrorMessage(data, 'Failed to check video status'));
       }
+
+      const result = data.data;
+      if (result.status === 'completed') {
+        if (showCompletedVideo(result)) {
+          return;
+        }
+        // The status payload may omit the video; fetch the full job record.
+        const jobResponse = await apiFetch(`/api/video/jobs/${encodeURIComponent(jobId)}`);
+        const jobData = await jobResponse.json();
+        if (jobResponse.ok && jobData.data && showCompletedVideo({ ...result, ...jobData.data })) {
+          return;
+        }
+        throw new Error('Video completed but no video data was returned');
+      }
+      if (result.status === 'failed') {
+        throw new Error(result.error || 'Video generation failed');
+      }
+
+      if (result.status === 'processing') {
+        setStatusMessage(`Processing video... (${attempts * 10}s elapsed)`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10000));
     }
 
     throw new Error('Video generation timed out. Please try again.');
@@ -296,17 +284,14 @@ export default function VideoGenerator() {
       
       const response = await apiFetch('/api/video/generate', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...authHeaders,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestBody),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.detail || data.error?.message || 'Failed to generate video');
+        throw new Error(getApiErrorMessage(data, 'Failed to generate video'));
       }
 
       // Start polling if we got a job ID
@@ -683,7 +668,7 @@ export default function VideoGenerator() {
                           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                             {job.mode === 'text' ? 'Text-to-Video' : 'Image-to-Video'} • {' '}
                             {job.createdAt
-                              ? new Date(job.createdAt).toLocaleString()
+                              ? formatDateTime(job.createdAt)
                               : 'Date unavailable'}
                           </p>
                         </div>
@@ -743,14 +728,7 @@ export default function VideoGenerator() {
                     className="w-full rounded-lg shadow-lg"
                   />
                   <Button
-                    onClick={() => {
-                      const link = document.createElement('a');
-                      link.href = generatedVideo;
-                      link.download = `generated-video-${Date.now()}.mp4`;
-                      document.body.appendChild(link);
-                      link.click();
-                      document.body.removeChild(link);
-                    }}
+                    onClick={() => downloadFromUrl(generatedVideo, `generated-video-${Date.now()}.mp4`)}
                     className="w-full"
                   >
                     Download Video
@@ -771,14 +749,7 @@ export default function VideoGenerator() {
                             />
                             <Button
                               variant="secondary"
-                              onClick={() => {
-                                const link = document.createElement('a');
-                                link.href = firstFrameExtracted;
-                                link.download = `first-frame-${Date.now()}.jpg`;
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                              }}
+                              onClick={() => downloadFromUrl(firstFrameExtracted, `first-frame-${Date.now()}.jpg`)}
                               className="w-full text-xs"
                             >
                               Download First Frame
@@ -796,14 +767,7 @@ export default function VideoGenerator() {
                             />
                             <Button
                               variant="secondary"
-                              onClick={() => {
-                                const link = document.createElement('a');
-                                link.href = lastFrameExtracted;
-                                link.download = `last-frame-${Date.now()}.jpg`;
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                              }}
+                              onClick={() => downloadFromUrl(lastFrameExtracted, `last-frame-${Date.now()}.jpg`)}
                               className="w-full text-xs"
                             >
                               Download Last Frame

@@ -1,12 +1,11 @@
 """API routes for prompt template management."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import List, Tuple
+from typing import Tuple
 
 from models import (
     CreateTemplateRequest,
     UpdateTemplateRequest,
-    TemplateResponse,
     SuccessResponse,
     LoginUser,
 )

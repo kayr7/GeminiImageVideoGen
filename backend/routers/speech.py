@@ -4,61 +4,33 @@ Documentation: https://ai.google.dev/gemini-api/docs/speech-generation
 """
 
 from fastapi import APIRouter, HTTPException, Request, Depends
-from google import genai
 from google.genai import types
-import os
-import base64
+import io
+import logging
+import wave
 from datetime import datetime
 from typing import Tuple
 
 from models import (
     SpeechGenerationRequest,
-    SpeechResponse,
     SuccessResponse,
     LoginUser,
 )
 from utils.config import resolve_model_choice
 from utils.media_storage import get_media_storage
-from utils.rate_limiter import check_rate_limit
+from utils.gemini import get_client, get_client_ip, to_base64
+from utils.rate_limiter import enforce_rate_limit
 from utils.auth import get_current_user_with_db
 from utils.user_manager import User
 from utils.quota_manager import QuotaManager
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
-def get_client():
-    """Get authenticated Gemini client"""
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
-    return genai.Client(api_key=api_key)
-
-
-def get_client_ip(request: Request) -> str:
-    """
-    Extract client IP address from request for abuse tracking.
-    Handles X-Forwarded-For and X-Real-IP headers for proxy scenarios.
-    """
-    # Check X-Forwarded-For header (comma-separated list, first is client)
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-
-    # Check X-Real-IP header
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip.strip()
-
-    # Fallback to direct client IP
-    if request.client and request.client.host:
-        return request.client.host
-
-    return "unknown"
-
-
 @router.post("/generate", response_model=SuccessResponse)
-async def generate_speech(
+def generate_speech(
     req: SpeechGenerationRequest,
     request: Request,
     auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
@@ -79,7 +51,7 @@ async def generate_speech(
             raise HTTPException(status_code=429, detail=error_msg)
 
         # Check rate limit
-        await check_rate_limit(db_user.id, "speech")
+        enforce_rate_limit(db_user.id, "speech")
 
         client = get_client()
 
@@ -92,36 +64,7 @@ async def generate_speech(
             raise HTTPException(status_code=status_code, detail=str(error))
         model_name = model_info["id"]
 
-        # Validate voice
-        capabilities = model_info.get("capabilities", {})
-        allowed_voices = capabilities.get("voices", [])
-        if allowed_voices and req.voice and req.voice not in allowed_voices and not req.speakers:
-             # If voice not in list, we might still try it if the list is not exhaustive, 
-             # but for now let's assume the config is the source of truth if populated.
-             # However, to be safe and flexible, we'll just warn or proceed. 
-             # Let's proceed but maybe the API will error if invalid.
-             pass
-
         try:
-            print(f"Calling Speech Generation with model {model_name}, voice {req.voice}")
-            
-            # Construct the API request
-            # Based on doc:
-            # response = client.models.generate_content(
-            #     model="gemini-2.5-flash-preview-tts",
-            #     contents="Say cheerfully: Have a wonderful day!",
-            #     config=types.GenerateContentConfig(
-            #         response_modalities=["AUDIO"],
-            #         speech_config=types.SpeechConfig(
-            #             voice_config=types.VoiceConfig(
-            #                 prebuilt_voice_config=types.PrebuiltVoiceConfig(
-            #                     voice_name='Kore',
-            #                 )
-            #             )
-            #         ),
-            #     )
-            # )
-
             if req.speakers:
                 # Multi-speaker configuration
                 speaker_voice_configs = []
@@ -164,7 +107,7 @@ async def generate_speech(
             )
 
         except Exception as api_error:
-            print(f"Speech API error: {str(api_error)}")
+            logger.exception("Speech API error (model=%s)", model_name)
             raise HTTPException(
                 status_code=500,
                 detail=f"Gemini API error: {str(api_error)}",
@@ -197,9 +140,6 @@ async def generate_speech(
             )
 
         # Convert PCM to WAV
-        import wave
-        import io
-        
         wav_buffer = io.BytesIO()
         with wave.open(wav_buffer, "wb") as wf:
             wf.setnchannels(1)
@@ -208,7 +148,7 @@ async def generate_speech(
             wf.writeframes(audio_data)
             
         wav_bytes = wav_buffer.getvalue()
-        wav_base64 = base64.b64encode(wav_bytes).decode("utf-8")
+        wav_base64 = to_base64(wav_bytes)
 
         # Save to storage
         storage = get_media_storage()
@@ -247,4 +187,5 @@ async def generate_speech(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("Speech generation failed")
         raise HTTPException(status_code=500, detail=str(e))
