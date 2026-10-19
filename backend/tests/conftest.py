@@ -31,6 +31,7 @@ import utils.admin_config as admin_config
 import utils.database as database
 import utils.gemini as gemini
 import utils.media_storage as media_storage
+import utils.prompt_lab as prompt_lab_utils
 import utils.rate_limiter as rate_limiter
 from utils.quota_manager import QuotaManager
 from utils.user_manager import UserManager
@@ -67,7 +68,9 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("ADMIN_CONFIG_PATH", str(tmp_path / "admin-config.json"))
 
     rate_limiter._rate_limits.clear()
+    prompt_lab_utils.reset_state()
     yield
+    prompt_lab_utils.reset_state()
     rate_limiter._rate_limits.clear()
 
 

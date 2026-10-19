@@ -9,6 +9,7 @@ import BatchQuotaModal from '@/components/admin/BatchQuotaModal';
 import BatchTagsModal, { type TagMode } from '@/components/admin/BatchTagsModal';
 import BulkCreateModal from '@/components/admin/BulkCreateModal';
 import UserFilters, { type StatusFilter } from '@/components/admin/UserFilters';
+import PromptLabPanel from '@/components/admin/PromptLabPanel';
 import UserTable from '@/components/admin/UserTable';
 import {
   DEFAULT_LIMITS,
@@ -550,6 +551,7 @@ export default function AdminPage() {
 
   return (
     <div className="max-w-full mx-auto space-y-4">
+      <PromptLabPanel />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">User Management</h1>

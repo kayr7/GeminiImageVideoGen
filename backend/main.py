@@ -24,6 +24,7 @@ from routers import (
     system_prompts,
     text_generation,
     speech,
+    prompt_lab,
 )
 from utils.user_manager import ensure_env_admin_exists
 from utils.database import initialize_database
@@ -85,6 +86,7 @@ app.add_middleware(
 # Include routers
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Administration"])
+app.include_router(prompt_lab.admin_router, prefix="/api/admin/prompt-lab", tags=["Prompt Lab Admin"])
 app.include_router(users.router, prefix="/api/admin/users", tags=["User Management"])
 app.include_router(quotas.router, prefix="/api/admin/quotas", tags=["Quota Management"])
 app.include_router(config.router, prefix="/api/config", tags=["Configuration"])
@@ -96,6 +98,7 @@ app.include_router(templates.router, prefix="/api/text/templates", tags=["Text T
 app.include_router(system_prompts.router, prefix="/api/text/system-prompts", tags=["System Prompts"])
 app.include_router(text_generation.router, prefix="/api/text", tags=["Text Generation"])
 app.include_router(speech.router, prefix="/api/speech", tags=["Speech Generation"])
+app.include_router(prompt_lab.router, prefix="/api/prompt-lab", tags=["Prompt Lab"])
 
 
 @app.get("/")

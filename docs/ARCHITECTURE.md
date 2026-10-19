@@ -53,6 +53,15 @@ only in the backend; the browser never sees it.
 
 Templates store prompt text with `{{variable}}` placeholders per media type (text, image, video). The UI detects variables (`lib/templates/utils.ts`), renders an input per variable and fills the prompt before sending. CRUD is at `/api/text/templates`.
 
+## Prompt Lab
+
+A public (no login) prompting playground for lectures, active only while an admin enables it (optionally with an expiry). Code: `routers/prompt_lab.py` (public `/api/prompt-lab/config`, `/generate`; admin `/api/admin/prompt-lab`) and `utils/prompt_lab.py` (model registry with thinking-budget rules, settings, limits, stats).
+
+- **Settings** live in the `promptLab` section of the admin config JSON (`admin_config.get_admin_section/store_admin_section`), cached in memory with an mtime check. Expired means disabled.
+- **Streaming**: `/generate` is an `async def` endpoint using the async SDK (`client.aio.models.generate_content_stream`) and answers with SSE (`thought`, `answer`, `usage`, `error`, `done` events, `: ping` heartbeats). Nothing blocks the event loop or uses the sync threadpool per request (only one small SQLite stats write at the end).
+- **Limits** (in memory, single process): input <= `PROMPT_LAB_MAX_INPUT_TOKENS` (local estimate, `count_tokens` only when near the limit), sliding-window rate limits per client id / IP, and a global semaphore (`PROMPT_LAB_MAX_CONCURRENCY`) with 503 after 10 s of waiting.
+- **Stats**: daily aggregates in `prompt_lab_usage` (no prompt text, no IPs).
+
 ## Security notes
 
 - Passwords are hashed; sessions are random bearer tokens stored in SQLite.

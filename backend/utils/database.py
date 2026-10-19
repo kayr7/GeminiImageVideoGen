@@ -413,6 +413,22 @@ MIGRATIONS: list[tuple[int, Iterable[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_media_ip_address ON media(ip_address, created_at DESC)",
         ),
     ),
+    (
+        10,
+        (
+            """
+            CREATE TABLE IF NOT EXISTS prompt_lab_usage (
+                date TEXT PRIMARY KEY,
+                requests INTEGER NOT NULL DEFAULT 0,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                thoughts_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                errors INTEGER NOT NULL DEFAULT 0,
+                rejected INTEGER NOT NULL DEFAULT 0
+            )
+            """,
+        ),
+    ),
 ]
 
 _db_initialized = False

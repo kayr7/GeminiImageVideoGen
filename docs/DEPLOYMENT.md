@@ -82,6 +82,8 @@ Key points in the nginx config:
 - `location /HdMImageVideo/api/` must be defined **before** `/HdMImageVideo` and proxies to port 8000
   with long timeouts (video generation can take minutes).
 - `/HdMImageVideo` proxies to port 3000 with WebSocket upgrade headers.
+- Prompt Lab streams Server-Sent Events: buffering is disabled by the backend's `X-Accel-Buffering: no`
+  header (no `proxy_buffering off;` needed), but `proxy_read_timeout` for `/api/` should be at least 120s.
 - `client_max_body_size` limits uploads (reference images); the example sets 10M.
 
 ## 4. Updating

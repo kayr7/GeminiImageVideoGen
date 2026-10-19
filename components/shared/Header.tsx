@@ -5,12 +5,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { usePathname } from 'next/navigation';
 
 import { useAuth } from '@/lib/context/AuthContext';
+import { usePromptLabStatus } from '@/lib/hooks/usePromptLabStatus';
 
 
 export default function Header() {
   const pathname = usePathname();
   const { config, token, user, logout, initialising } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const promptLabEnabled = usePromptLabStatus();
 
   const featureFlags = config?.features;
   const isAdmin = user?.roles?.includes('admin') ?? false;
@@ -28,6 +30,9 @@ export default function Header() {
       }
       items.push({ name: 'Text', href: '/text' });
       items.push({ name: 'Gallery', href: '/gallery' });
+      if (promptLabEnabled || isAdmin) {
+        items.push({ name: 'Prompt Lab', href: '/prompt' });
+      }
       if (token) {
         items.push({ name: 'Profile', href: '/profile' });
       }
@@ -36,7 +41,7 @@ export default function Header() {
       }
       return items;
     },
-    [featureFlags, isAdmin, token]
+    [featureFlags, isAdmin, token, promptLabEnabled]
   );
 
   const displayName = user?.displayName || user?.username;
