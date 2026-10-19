@@ -23,7 +23,14 @@ import type {
 type Mode = 'single' | 'chat';
 
 export default function TextGenerationPage() {
-  const { token, initialising } = useAuth();
+  const { token, initialising, config } = useAuth();
+  const textModels = useMemo(() => config?.models?.text?.enabled ?? [], [config]);
+  const [selectedModelId, setSelectedModelId] = useState<string>('');
+  const textModelId =
+    textModels.find((m) => m.id === selectedModelId)?.id ??
+    config?.models?.text?.default ??
+    textModels[0]?.id ??
+    undefined;
 
   // Mode selection
   const [mode, setMode] = useState<Mode>('single');
@@ -207,7 +214,7 @@ export default function TextGenerationPage() {
         systemPromptId: selectedSystemPrompt?.id,
         templateId: selectedTemplate?.id,
         variableValues: Object.keys(variableValues).length > 0 ? variableValues : undefined,
-        model: 'gemini-2.5-flash',
+        model: textModelId,
       });
 
       setResponse(result.modelResponse);
@@ -260,7 +267,7 @@ export default function TextGenerationPage() {
 
       const message = await chatAPI.sendMessage(currentSession.id, {
         message: userMessage,
-        model: 'gemini-2.5-flash',
+        model: textModelId,
       });
 
       // Replace temp message with real one and add model response
@@ -522,6 +529,23 @@ export default function TextGenerationPage() {
           >
             Multi-Turn Chat
           </button>
+          {textModels.length > 0 && (
+            <label className="ml-auto flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+              <span>Model</span>
+              <select
+                aria-label="Text model"
+                value={textModelId ?? ''}
+                onChange={(e) => setSelectedModelId(e.target.value)}
+                className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-gray-900 dark:text-white"
+              >
+                {textModels.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       </div>
 

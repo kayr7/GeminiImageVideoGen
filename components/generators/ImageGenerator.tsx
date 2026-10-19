@@ -73,23 +73,10 @@ export default function ImageGenerator() {
     [availableImageModels, model]
   );
 
-  const referenceImagesAllowed = useMemo(() => {
-    if (!selectedModel) {
-      return true;
-    }
-
-    return !selectedModel.id.toLowerCase().includes('imagen');
-  }, [selectedModel]);
-
-  useEffect(() => {
-    if (!referenceImagesAllowed && referenceImages.length > 0) {
-      setReferenceImages([]);
-    }
-  }, [referenceImagesAllowed, referenceImages]);
-
   const maxReferenceImages = useMemo(() => {
-    if (!selectedModel?.capabilities?.reference_images) return 5;
-    return selectedModel.capabilities.reference_images.max;
+    const refs = selectedModel?.capabilities?.reference_images;
+    if (!refs) return 0;
+    return refs.enabled === false ? 0 : refs.max;
   }, [selectedModel]);
 
   const imageGenerationEnabled = config ? config.features.imageGeneration : true;
@@ -118,7 +105,7 @@ export default function ImageGenerator() {
           model: model || undefined,
             aspectRatio,
             referenceImages:
-              referenceImagesAllowed && referenceImages.length > 0 ? referenceImages : undefined,
+              maxReferenceImages > 0 && referenceImages.length > 0 ? referenceImages : undefined,
           }),
       });
 
@@ -266,24 +253,15 @@ export default function ImageGenerator() {
             />
           </div>
 
-          <MultiFileUpload
-            label={`Reference Images (Max ${maxReferenceImages})`}
-            accept="image/*"
-            maxFiles={maxReferenceImages}
-            onFilesSelect={(files, base64Array) => setReferenceImages(base64Array)}
-            preview
-            helperText={
-              referenceImagesAllowed
-                ? 'Upload multiple images for composition or style transfer'
-                : undefined
-            }
-            disabled={!referenceImagesAllowed}
-          />
-
-          {!referenceImagesAllowed && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">
-              Reference images are not supported with Imagen models.
-            </p>
+          {maxReferenceImages > 0 && (
+            <MultiFileUpload
+              label={`Reference Images (Max ${maxReferenceImages})`}
+              accept="image/*"
+              maxFiles={maxReferenceImages}
+              onFilesSelect={(files, base64Array) => setReferenceImages(base64Array.slice(0, maxReferenceImages))}
+              preview
+              helperText="Upload multiple images for composition or style transfer"
+            />
           )}
 
           {selectedModel && (
@@ -339,10 +317,8 @@ export default function ImageGenerator() {
               <li>• Mention style, mood, lighting, and composition</li>
               <li>• <strong>Multiple images:</strong> Combine elements or transfer style</li>
               <li>• <strong>Single image:</strong> Best for editing or variations</li>
-              <li>• <strong>Nano Banana 2:</strong> Best overall — pro quality at flash speed, up to 10 ref images</li>
-              <li>• <strong>Nano Banana Pro:</strong> Reasoning-driven, complex instructions, up to 14 ref images</li>
-              <li>• <strong>Imagen Ultra:</strong> Highest quality text-to-image (no ref images)</li>
-              <li>• <strong>Imagen Fast:</strong> Cheapest &amp; fastest text-to-image</li>
+              <li>• <strong>Nano Banana 2:</strong> Best overall — pro quality at flash speed, reference images supported</li>
+              <li>• <strong>Nano Banana Pro:</strong> Reasoning-driven, complex instructions, reference images supported</li>
             </ul>
           </div>
         </div>

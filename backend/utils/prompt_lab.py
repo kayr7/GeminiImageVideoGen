@@ -43,39 +43,58 @@ def max_input_tokens() -> int:
 
 # --------------------------------------------------------------------------- registry
 
-def _preset(label: str, budget: int) -> Dict[str, Any]:
+def _budget_preset(label: str, budget: int) -> Dict[str, Any]:
     return {"label": label, "budget": budget}
 
 
+def _level_preset(level: str) -> Dict[str, Any]:
+    return {"label": level.capitalize(), "level": level}
+
+
+def _level_model(model_id: str, name: str, description: str, levels: List[str],
+                 default: str, note: str, can_disable: bool = False) -> Dict[str, Any]:
+    return {
+        "id": model_id, "name": name, "description": description,
+        "supportsTemperature": False,
+        "thinking": {
+            "kind": "level", "canDisable": can_disable,
+            "presets": [_level_preset(lv) for lv in levels],
+            "default": {"level": default}, "note": note,
+        },
+    }
+
+
 MODEL_REGISTRY: List[Dict[str, Any]] = [
+    _level_model(
+        "gemini-3.8-flash", "Gemini 3.8 Flash",
+        "Newest Flash model: fast, capable, thinking always on.",
+        ["low", "medium", "high"], "medium", "No 'off' or 'minimal' \u2013 lowest is low"),
+    _level_model(
+        "gemini-3.6-flash", "Gemini 3.6 Flash",
+        "Previous-generation Flash model with a 'minimal' thinking level.",
+        ["minimal", "low", "medium", "high"], "medium",
+        "Does not show its thoughts; 'minimal' may still think a little"),
+    _level_model(
+        "gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite",
+        "Cheapest 3.x model; minimal thinking by default.",
+        ["minimal", "low", "medium", "high"], "minimal",
+        "Lowest setting 'minimal' may still think a little"),
+    _level_model(
+        "gemini-4-argon", "Gemini 4 Argon",
+        "Flagship reasoning model (expensive).",
+        ["low", "medium", "high"], "medium", "Thinking cannot be turned off"),
     {
         "id": "gemini-2.5-flash",
         "name": "Gemini 2.5 Flash",
-        "description": "Fast all-rounder; thinking can be switched off.",
+        "description": "Legacy Flash model; thinking can be switched off.",
+        "supportsTemperature": True,
         "thinking": {
-            "canDisable": True, "min": 0, "max": 24576, "defaultBudget": -1,
-            "presets": [_preset("Off", 0), _preset("Low", 1024), _preset("Medium", 4096),
-                        _preset("High", 16384), _preset("Dynamic", -1)],
-        },
-    },
-    {
-        "id": "gemini-2.5-flash-lite",
-        "name": "Gemini 2.5 Flash-Lite",
-        "description": "Smallest and cheapest; thinking is off by default.",
-        "thinking": {
-            "canDisable": True, "min": 512, "max": 24576, "defaultBudget": 0,
-            "presets": [_preset("Off", 0), _preset("Low", 1024), _preset("Medium", 4096),
-                        _preset("Dynamic", -1)],
-        },
-    },
-    {
-        "id": "gemini-2.5-pro",
-        "name": "Gemini 2.5 Pro",
-        "description": "Strongest reasoning; thinking is always on.",
-        "thinking": {
-            "canDisable": False, "min": 128, "max": 32768, "defaultBudget": -1,
-            "presets": [_preset("Low", 1024), _preset("Medium", 4096),
-                        _preset("High", 16384), _preset("Dynamic", -1)],
+            "kind": "budget", "canDisable": True, "min": 0, "max": 24576,
+            "default": {"budget": -1},
+            "presets": [_budget_preset("Off", 0), _budget_preset("Low", 1024),
+                        _budget_preset("Medium", 4096), _budget_preset("High", 16384),
+                        _budget_preset("Dynamic", -1)],
+            "note": "Only model where thinking is truly off",
         },
     },
 ]
@@ -84,8 +103,9 @@ _REGISTRY_BY_ID = {m["id"]: m for m in MODEL_REGISTRY}
 DEFAULT_SETTINGS: Dict[str, Any] = {
     "enabled": False,
     "expiresAt": None,
-    "allowedModels": ["gemini-2.5-flash", "gemini-2.5-flash-lite"],
-    "defaultModel": "gemini-2.5-flash",
+    "allowedModels": ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite",
+                      "gemini-2.5-flash"],
+    "defaultModel": "gemini-3.8-flash",
     "maxOutputTokens": 2048,
     "allowHistory": True,
 }
@@ -101,6 +121,8 @@ def all_model_ids() -> List[str]:
 
 def validate_budget(model: Dict[str, Any], budget: int) -> None:
     t = model["thinking"]
+    if t["kind"] != "budget":
+        raise HTTPException(400, f"{model['name']} uses thinking levels, not a token budget.")
     if budget == -1:
         return
     if budget == 0:
@@ -114,6 +136,16 @@ def validate_budget(model: Dict[str, Any], budget: int) -> None:
             f"Invalid thinking budget {budget} for {model['name']}: use "
             f"{'0, ' if t['canDisable'] else ''}-1 (dynamic) or {lo}-{t['max']}.",
         )
+
+
+def validate_level(model: Dict[str, Any], level: str) -> None:
+    t = model["thinking"]
+    if t["kind"] != "level":
+        raise HTTPException(400, f"{model['name']} uses a thinking budget, not levels.")
+    allowed = [p["level"] for p in t["presets"]]
+    if level not in allowed:
+        raise HTTPException(
+            400, f"Invalid thinking level '{level}' for {model['name']}: use {', '.join(allowed)}.")
 
 
 # --------------------------------------------------------------------------- settings
@@ -139,7 +171,10 @@ def _normalise(raw: Dict[str, Any]) -> Dict[str, Any]:
     if _parse_expiry(raw.get("expiresAt")):
         s["expiresAt"] = raw["expiresAt"]
     if isinstance(raw.get("allowedModels"), list):
-        s["allowedModels"] = [m for m in raw["allowedModels"] if m in _REGISTRY_BY_ID]
+        valid = [m for m in raw["allowedModels"] if m in _REGISTRY_BY_ID]
+        # Stored ids may reference retired models; if none survive, keep the defaults.
+        if valid:
+            s["allowedModels"] = valid
     mo = raw.get("maxOutputTokens")
     if isinstance(mo, int) and not isinstance(mo, bool):
         s["maxOutputTokens"] = min(max(mo, MAX_OUTPUT_TOKENS_RANGE[0]), MAX_OUTPUT_TOKENS_RANGE[1])

@@ -36,7 +36,8 @@ class LabMessage(BaseModel):
 
 
 class LabThinking(BaseModel):
-    budget: int
+    budget: Optional[int] = None
+    level: Optional[str] = None
 
 
 class LabRequest(BaseModel):
@@ -92,7 +93,21 @@ async def generate(request: Request, x_client_id: Optional[str] = Header(default
     model = lab.get_model(body.model)
     if model is None or body.model not in settings["allowedModels"]:
         raise HTTPException(status_code=400, detail="Unknown or unavailable model")
-    lab.validate_budget(model, body.thinking.budget)
+    kind = model["thinking"]["kind"]
+    budget: Optional[int] = None
+    level: Optional[str] = None
+    if (body.thinking.budget is None) == (body.thinking.level is None):
+        raise HTTPException(400, "thinking must contain exactly one of 'budget' or 'level'")
+    if kind == "budget":
+        budget = body.thinking.budget
+        if budget is None:
+            raise HTTPException(400, f"{model['name']} requires thinking.budget")
+        lab.validate_budget(model, budget)
+    else:
+        level = body.thinking.level
+        if level is None:
+            raise HTTPException(400, f"{model['name']} requires thinking.level")
+        lab.validate_level(model, level)
 
     if body.messages[-1].role != "user":
         raise HTTPException(status_code=400, detail="The last message must have role 'user'")
@@ -111,15 +126,19 @@ async def generate(request: Request, x_client_id: Optional[str] = Header(default
     except HTTPException as exc:
         raise await _reject(exc)
 
-    budget = body.thinking.budget
-    config = types.GenerateContentConfig(
-        system_instruction=system,
-        temperature=body.temperature,
-        max_output_tokens=settings["maxOutputTokens"],
-        thinking_config=types.ThinkingConfig(
+    if level is not None:
+        thinking_config = types.ThinkingConfig(
+            thinking_level=level, include_thoughts=body.includeThoughts)
+    else:
+        thinking_config = types.ThinkingConfig(
             thinking_budget=budget,
             include_thoughts=(budget != 0 and body.includeThoughts),
-        ),
+        )
+    config = types.GenerateContentConfig(
+        system_instruction=system,
+        temperature=body.temperature if model["supportsTemperature"] else None,
+        max_output_tokens=settings["maxOutputTokens"],
+        thinking_config=thinking_config,
     )
     contents = [types.Content(role=m["role"], parts=[types.Part(text=m["text"])]) for m in messages]
 
@@ -128,7 +147,7 @@ async def generate(request: Request, x_client_id: Optional[str] = Header(default
     except HTTPException as exc:
         raise await _reject(exc)
 
-    stream = _stream(client, body.model, contents, config, budget, lease)
+    stream = _stream(client, body.model, contents, config, budget, level, lease)
     return _LeasedStreamingResponse(
         stream,
         lease=lease,
@@ -163,7 +182,7 @@ async def _upstream(client: Any, model: str, contents: list, config: Any) -> Asy
         yield chunk
 
 
-async def _stream(client, model, contents, config, budget, lease) -> AsyncIterator[str]:
+async def _stream(client, model, contents, config, budget, level, lease) -> AsyncIterator[str]:
     start = time.monotonic()
     first_ms: Optional[int] = None
     usage = None
@@ -216,14 +235,14 @@ async def _stream(client, model, contents, config, budget, lease) -> AsyncIterat
     t = int(getattr(usage, "thoughts_token_count", 0) or 0)
     o = int(getattr(usage, "candidates_token_count", 0) or 0)
     total = int(getattr(usage, "total_token_count", 0) or (p + t + o))
-    logger.info("prompt-lab model=%s budget=%s prompt=%d thoughts=%d output=%d latency_ms=%d%s",
-                model, budget, p, t, o, latency, " error" if failed else "")
+    logger.info("prompt-lab model=%s budget=%s level=%s prompt=%d thoughts=%d output=%d latency_ms=%d%s",
+                model, budget, level, p, t, o, latency, " error" if failed else "")
     await lab.record_usage(p, t, o, error=failed)
     if not failed:
         yield _sse("usage", {
             "promptTokens": p, "thoughtsTokens": t, "outputTokens": o, "totalTokens": total,
             "firstTokenMs": first_ms if first_ms is not None else latency,
-            "latencyMs": latency, "model": model, "thinkingBudget": budget,
+            "latencyMs": latency, "model": model, "thinkingBudget": budget, "thinkingLevel": level,
         })
     yield _sse("done", {})
 

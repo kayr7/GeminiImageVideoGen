@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 # Image Generation Models
 class ImageGenerationRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=10000)
-    model: Optional[str] = Field(default="gemini-3.1-flash-image-preview")
+    model: Optional[str] = Field(default="gemini-nano-banana-2.1")
     aspectRatio: Optional[str] = Field(default="1:1")
     negativePrompt: Optional[str] = None
     referenceImages: Optional[List[str]] = None
@@ -17,7 +17,7 @@ class ImageGenerationRequest(BaseModel):
 
 class ImageEditRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=10000)
-    model: Optional[str] = Field(default="gemini-3.1-flash-image-preview")
+    model: Optional[str] = Field(default="gemini-nano-banana-2.1")
     aspectRatio: Optional[str] = Field(default="1:1")
     sourceImages: Optional[List[str]] = None
     maskImage: Optional[str] = None
@@ -54,7 +54,7 @@ class SpeechGenerationRequest(BaseModel):
     voice: Optional[str] = Field(None, min_length=1)
     speakers: Optional[List[SpeakerConfig]] = None
     language: Optional[str] = None
-    model: Optional[str] = Field(default="gemini-2.5-flash-preview-tts")
+    model: Optional[str] = Field(default="gemini-3.8-flash-tts")
 
 
 # Media Storage Models
@@ -235,7 +235,7 @@ class TextGenerationRequest(BaseModel):
     systemPromptId: Optional[str] = None
     templateId: Optional[str] = None
     variableValues: Optional[Dict[str, str]] = None
-    model: Optional[str] = Field(default="gemini-2.0-flash-exp")
+    model: Optional[str] = Field(default="gemini-3.8-flash")
 
 
 class CreateChatSessionRequest(BaseModel):
@@ -251,6 +251,6 @@ class UpdateChatSessionRequest(BaseModel):
 
 class SendMessageRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=10000)
-    model: Optional[str] = Field(default="gemini-2.0-flash-exp")
+    model: Optional[str] = Field(default="gemini-3.8-flash")
 
 

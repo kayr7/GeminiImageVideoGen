@@ -110,3 +110,17 @@ def test_job_inputs_moved_to_files_on_completion(client, user_a, fake_video):
     item = client.get("/api/media/list", headers=ha).json()["data"]["media"][0]
     assert len(item["details"]["sourceImages"]) == 1
     assert client.get(item["details"]["sourceImages"][0]).status_code == 200
+
+
+def test_lite_supports_frames_but_not_reference_images(client, user_a, fake_video):
+    _, h = user_a
+    img = "data:image/png;base64,iVBORw0KGgo="
+    lite = "veo-3.1-lite-generate-preview"
+    r = client.post("/api/video/generate", headers=h,
+                    json={"prompt": "x", "model": lite, "referenceImages": [img]})
+    assert r.status_code == 400
+    r = client.post("/api/video/generate", headers=h,
+                    json={"prompt": "x", "model": lite, "firstFrame": img, "lastFrame": img})
+    assert r.status_code == 200, r.text
+    assert client.post("/api/video/generate", headers=h,
+                       json={"prompt": "x", "model": "veo-3.0-generate-001"}).status_code == 400

@@ -9,10 +9,10 @@ managed web app: per-user accounts, quotas, a gallery of generated media, and an
 
 ## Features
 
-- **Image:** Gemini image models (Nano Banana family) and Imagen 4, aspect ratios, negative prompts, editing with reference images
-- **Video:** Veo 3.x with audio, text-to-video, image-to-video, first/last frame, reference images ([details](docs/VEO.md))
-- **Speech:** Gemini TTS
-- **Text:** Gemini text generation with history, chat sessions, system prompts and `{{variable}}` prompt templates
+- **Image:** Nano Banana models (2.1, 2, 2 Lite, Pro), aspect ratios, editing with reference images
+- **Video:** Veo 3.1 / 3.1 Fast / 3.1 Lite with audio, text-to-video, image-to-video, first/last frame, reference images ([details](docs/VEO.md))
+- **Speech:** Gemini 3.8 Flash TTS / Flash-Lite TTS
+- **Text:** Gemini 3.8 Flash (default), 3.6 Flash, 3.5 Flash-Lite and 2.5 Flash text generation with history, chat sessions, system prompts and `{{variable}}` prompt templates
 - **Gallery:** all generated media with thumbnails, stored on disk
 - **Accounts and quotas:** admin-created users (bulk create, tags), per-user quotas for image/video/text/speech (total usage, not time-based), rate limits, admin control of which models are enabled
 
@@ -89,4 +89,4 @@ npm test          # frontend (Jest)
 
 ## Further reading
 
-[Gemini API](https://ai.google.dev/gemini-api/docs) | [Imagen](https://ai.google.dev/gemini-api/docs/imagen) | [Veo](https://ai.google.dev/gemini-api/docs/video) | [Changelog](Changelog.md)
+[Gemini API](https://ai.google.dev/gemini-api/docs) | [Image generation](https://ai.google.dev/gemini-api/docs/image-generation) | [Veo](https://ai.google.dev/gemini-api/docs/video) | [Changelog](Changelog.md)

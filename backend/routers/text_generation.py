@@ -12,6 +12,7 @@ from models import (
     SuccessResponse,
     LoginUser,
 )
+from utils.config import resolve_model_choice
 from utils.gemini import get_client_ip
 from utils.auth import get_current_user_with_db
 from utils.text_generation_manager import TextGenerationManager
@@ -22,6 +23,15 @@ from utils.quota_manager import QuotaManager
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _resolve_text_model(requested):
+    """Validate the requested text model against the registry (unknown -> 400)."""
+    try:
+        return resolve_model_choice("text", requested)
+    except LookupError as error:
+        status_code = 400 if (requested or "").strip() else 503
+        raise HTTPException(status_code=status_code, detail=str(error))
 
 
 # Text Generation Routes
@@ -49,7 +59,7 @@ def generate_text(
             system_prompt_id=request_body.systemPromptId,
             template_id=request_body.templateId,
             variable_values=request_body.variableValues,
-            model=request_body.model or "gemini-2.0-flash-exp",
+            model=_resolve_text_model(request_body.model)["id"],
             ip_address=client_ip,
         )
 
@@ -238,7 +248,7 @@ def send_chat_message(
             session_id=session_id,
             user_id=db_user.id,
             user_message=request_body.message,
-            model=request_body.model or "gemini-2.0-flash-exp",
+            model=_resolve_text_model(request_body.model)["id"],
         )
 
         # Increment quota

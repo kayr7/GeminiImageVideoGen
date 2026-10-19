@@ -8,7 +8,7 @@ const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: 'Gemini Creative Playground',
-  description: 'Generate images, videos, and music with Google Gemini AI',
+  description: 'Generate images, videos, and speech with Google Gemini AI',
 };
 
 export default function RootLayout({

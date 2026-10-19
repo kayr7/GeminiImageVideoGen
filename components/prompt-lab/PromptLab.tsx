@@ -11,6 +11,15 @@ import {
   type ChatMessage,
   type PromptLabConfig,
   type RunState,
+  COMPARE_OFF_MODEL,
+  defaultPreset,
+  findPreset,
+  highestFixedPreset,
+  isThinkingOff,
+  lowestPreset,
+  presetKey,
+  presetToThinking,
+  type PromptLabModel,
   type ThinkingPreset,
 } from './types';
 
@@ -30,7 +39,7 @@ export default function PromptLab({ config, onInactive }: Props) {
     () => config.models.find((m) => m.id === modelId) ?? config.models[0],
     [config.models, modelId]
   );
-  const [budget, setBudget] = useState<number>(model?.thinking.defaultBudget ?? 0);
+  const [presetSel, setPresetSel] = useState<string>(() => (model ? presetKey(defaultPreset(model) ?? { label: '' }) : ''));
   const [showThoughts, setShowThoughts] = useState(true);
   const [system, setSystem] = useState('');
   const [sysOpen, setSysOpen] = useState(false);
@@ -47,28 +56,39 @@ export default function PromptLab({ config, onInactive }: Props) {
 
   const chat = mode === 'chat' && config.allowHistory;
   const running = left.status === 'running' || right.status === 'running';
-  const thinking = model?.thinking;
+  const preset = findPreset(model, presetSel) ?? (model ? defaultPreset(model) : undefined);
 
-  const presets: Array<ThinkingPreset & { disabled?: boolean }> = useMemo(() => {
-    if (!thinking) return [];
-    const list: Array<ThinkingPreset & { disabled?: boolean }> = thinking.presets.map((p) => ({
-      ...p,
-      disabled: p.budget === 0 && !thinking.canDisable,
-    }));
-    if (!thinking.canDisable && !list.some((p) => p.budget === 0)) {
-      list.unshift({ label: 'Off', budget: 0, disabled: true });
+  // Compare-mode sides: each has its own model + thinking preset.
+  const [leftModelId, setLeftModelId] = useState('');
+  const [leftSel, setLeftSel] = useState('');
+  const [rightModelId, setRightModelId] = useState('');
+  const [rightSel, setRightSel] = useState('');
+  const modelById = useCallback((id: string) => config.models.find((m) => m.id === id), [config.models]);
+  const leftModel = modelById(leftModelId) ?? model;
+  const rightModel = modelById(rightModelId) ?? model;
+  const leftPreset = findPreset(leftModel, leftSel) ?? (leftModel ? lowestPreset(leftModel) : undefined);
+  const rightPreset = findPreset(rightModel, rightSel) ?? (rightModel ? highestFixedPreset(rightModel) : undefined);
+
+  const initCompare = () => {
+    if (!model) return;
+    const base = modelById(COMPARE_OFF_MODEL);
+    const offPreset = base?.thinking.presets.find(isThinkingOff);
+    if (base && offPreset) {
+      setLeftModelId(base.id);
+      setLeftSel(presetKey(offPreset));
+    } else {
+      setLeftModelId(model.id);
+      setLeftSel(presetKey(lowestPreset(model) ?? { label: '' }));
     }
-    return list;
-  }, [thinking]);
-
-  const selectedPreset = presets.find((p) => p.budget === budget);
-  const selectedLabel = selectedPreset?.label ?? (budget < 0 ? 'Dynamic' : `${budget} tokens`);
-  const compareBaseBudget = thinking ? (thinking.canDisable ? 0 : thinking.min) : 0;
+    setRightModelId(model.id);
+    setRightSel(presetKey(highestFixedPreset(model) ?? { label: '' }));
+  };
 
   const onModelChange = (id: string) => {
     setModelId(id);
     const m = config.models.find((x) => x.id === id);
-    if (m) setBudget(m.thinking.defaultBudget);
+    const dp = m ? defaultPreset(m) : undefined;
+    if (dp) setPresetSel(presetKey(dp));
   };
 
   // Token estimate
@@ -88,21 +108,22 @@ export default function PromptLab({ config, onInactive }: Props) {
   const runOne = useCallback(
     async (
       set: (fn: (r: RunState) => RunState) => void,
-      runBudget: number,
+      runModel: PromptLabModel,
+      runPreset: ThinkingPreset,
       messages: ChatMessage[],
       controller: AbortController
     ): Promise<{ answer: string; ok: boolean }> => {
       let answer = '';
-      set(() => ({ ...EMPTY_RUN, status: 'running', budget: runBudget }));
+      set(() => ({ ...EMPTY_RUN, status: 'running' }));
       try {
         await streamGenerate(
           {
-            model: model!.id,
+            model: runModel.id,
             messages,
             systemInstruction: system.trim() ? system : null,
-            thinking: { budget: runBudget },
-            includeThoughts: showThoughts && runBudget !== 0,
-            temperature,
+            thinking: presetToThinking(runModel, runPreset),
+            includeThoughts: showThoughts && !isThinkingOff(runPreset),
+            ...(runModel.supportsTemperature ? { temperature } : {}),
           },
           {
             onThought: (t) => set((r) => ({ ...r, thought: r.thought + t })),
@@ -127,11 +148,11 @@ export default function PromptLab({ config, onInactive }: Props) {
         return { answer, ok: false };
       }
     },
-    [model, system, showThoughts, temperature, onInactive]
+    [system, showThoughts, temperature, onInactive]
   );
 
   const send = useCallback(async () => {
-    if (!canSend || !model) return;
+    if (!canSend || !model || !preset) return;
     const text = prompt;
     const messages: ChatMessage[] = chat
       ? [...history, { role: 'user', text }]
@@ -144,7 +165,7 @@ export default function PromptLab({ config, onInactive }: Props) {
       setPending(text);
       setPrompt('');
       setRight(EMPTY_RUN);
-      const res = await runOne(setLeft, budget, messages, c1);
+      const res = await runOne(setLeft, model, preset, messages, c1);
       if (res.answer) {
         setHistory([...messages, { role: 'model', text: res.answer }]);
       } else if (!res.ok) {
@@ -158,14 +179,14 @@ export default function PromptLab({ config, onInactive }: Props) {
       const c2 = new AbortController();
       controllers.current = [c1, c2];
       await Promise.all([
-        runOne(setLeft, compareBaseBudget, messages, c1),
-        runOne(setRight, budget, messages, c2),
+        runOne(setLeft, leftModel!, leftPreset!, messages, c1),
+        runOne(setRight, rightModel!, rightPreset!, messages, c2),
       ]);
     } else {
       setRight(EMPTY_RUN);
-      await runOne(setLeft, budget, messages, c1);
+      await runOne(setLeft, model, preset, messages, c1);
     }
-  }, [canSend, model, prompt, chat, history, compare, budget, compareBaseBudget, runOne]);
+  }, [canSend, model, preset, prompt, chat, history, compare, leftModel, leftPreset, rightModel, rightPreset, runOne]);
 
   const clearHistory = () => {
     stop();
@@ -190,7 +211,13 @@ export default function PromptLab({ config, onInactive }: Props) {
   }
 
   const showCompare = compare && !chat;
-  const thinkingOff = budget === 0;
+  const thinkingOff = showCompare
+    ? !!leftPreset && !!rightPreset && isThinkingOff(leftPreset) && isThinkingOff(rightPreset)
+    : !!preset && isThinkingOff(preset);
+  const showTemperature = showCompare
+    ? !!leftModel?.supportsTemperature || !!rightModel?.supportsTemperature
+    : model.supportsTemperature;
+  const sideLabel = (m?: PromptLabModel, pr?: ThinkingPreset) => `${m?.name ?? ''} · ${pr?.label ?? ''}`;
 
   return (
     <div className="space-y-6">
@@ -210,30 +237,11 @@ export default function PromptLab({ config, onInactive }: Props) {
           </label>
 
           <div className="space-y-1">
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Thinking</span>
-            <div role="radiogroup" aria-label="Thinking" className="flex flex-wrap gap-1 rounded-xl bg-gray-100 dark:bg-gray-800 p-1">
-              {presets.map((p) => {
-                const active = p.budget === budget && !p.disabled;
-                return (
-                  <button
-                    key={`${p.label}-${p.budget}`}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    disabled={p.disabled}
-                    title={p.disabled ? 'This model always thinks' : undefined}
-                    onClick={() => setBudget(p.budget)}
-                    className={`flex-1 rounded-lg px-3 py-2 text-base font-semibold transition-colors ${
-                      active
-                        ? 'bg-blue-600 text-white shadow'
-                        : 'text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-700'
-                    } disabled:cursor-not-allowed disabled:opacity-40`}
-                  >
-                    {p.label}
-                  </button>
-                );
-              })}
-            </div>
+            {!showCompare ? (
+              <ThinkingControl label="Thinking" model={model} selected={presetSel} onSelect={setPresetSel} />
+            ) : (
+              <p className="text-sm text-gray-600 dark:text-gray-300">Choose a model and thinking setting for each side below.</p>
+            )}
             {!thinkingOff && (
               <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                 <input type="checkbox" checked={showThoughts} onChange={(e) => setShowThoughts(e.target.checked)} />
@@ -242,6 +250,43 @@ export default function PromptLab({ config, onInactive }: Props) {
             )}
           </div>
         </div>
+
+        {showCompare && (
+          <div className="grid gap-4 md:grid-cols-2">
+            {([
+              ['Left', leftModel, leftSel, setLeftModelId, setLeftSel],
+              ['Right', rightModel, rightSel, setRightModelId, setRightSel],
+            ] as const).map(([side, m, sel, setM, setSel]) => (
+              <div key={side} className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{side} model</span>
+                  <select
+                    className={field}
+                    aria-label={`${side} model`}
+                    value={m?.id ?? ''}
+                    onChange={(e) => {
+                      setM(e.target.value);
+                      const nm = modelById(e.target.value);
+                      const np = nm ? (side === 'Left' ? lowestPreset(nm) : highestFixedPreset(nm)) : undefined;
+                      if (np) setSel(presetKey(np));
+                    }}
+                  >
+                    {config.models.map((x) => (
+                      <option key={x.id} value={x.id}>
+                        {x.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {m && <ThinkingControl label={`${side} thinking`} model={m} selected={sel} onSelect={setSel} />}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Gemini 3.x models always think a little; use Gemini 2.5 Flash · Off to see a model with no reasoning.
+        </p>
 
         <div className="flex flex-wrap items-center gap-4">
           <div role="group" aria-label="Mode" className="inline-flex rounded-lg bg-gray-100 dark:bg-gray-800 p-1">
@@ -273,7 +318,10 @@ export default function PromptLab({ config, onInactive }: Props) {
               type="checkbox"
               checked={compare && !chat}
               disabled={chat}
-              onChange={(e) => setCompare(e.target.checked)}
+              onChange={(e) => {
+                setCompare(e.target.checked);
+                if (e.target.checked) initCompare();
+              }}
               className="h-4 w-4"
             />
             Compare thinking
@@ -296,6 +344,7 @@ export default function PromptLab({ config, onInactive }: Props) {
                 placeholder="You are a helpful tutor who answers in one sentence."
               />
             </label>
+            {showTemperature && (
             <div className="space-y-2">
               <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                 Temperature: {temperature === null ? 'model default' : temperature.toFixed(1)}
@@ -316,6 +365,7 @@ export default function PromptLab({ config, onInactive }: Props) {
                 </button>
               </div>
             </div>
+            )}
           </div>
         )}
       </section>
@@ -418,10 +468,10 @@ export default function PromptLab({ config, onInactive }: Props) {
       {!chat && showCompare && (left.status !== 'idle' || right.status !== 'idle') && (
         <section className="grid gap-4 lg:grid-cols-2">
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-            <OutputPane key={`l${runId}`} run={left} title={compareBaseBudget === 0 ? 'Thinking: Off' : `Thinking: minimum (${compareBaseBudget})`} />
+            <OutputPane key={`l${runId}`} run={left} title={sideLabel(leftModel, leftPreset)} />
           </div>
           <div className="rounded-xl border border-blue-300 dark:border-blue-700 p-4">
-            <OutputPane key={`r${runId}`} run={right} title={`Thinking: ${selectedLabel}`} />
+            <OutputPane key={`r${runId}`} run={right} title={sideLabel(rightModel, rightPreset)} />
           </div>
         </section>
       )}
@@ -440,6 +490,45 @@ function Bubble({ role, text }: { role: 'user' | 'model'; text: string }) {
   ) : (
     <div className="mr-8 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-800 p-4 text-lg text-gray-900 dark:text-gray-100">
       <SimpleMarkdown text={text} />
+    </div>
+  );
+}
+
+function ThinkingControl({
+  label,
+  model,
+  selected,
+  onSelect,
+}: {
+  label: string;
+  model: PromptLabModel;
+  selected: string;
+  onSelect: (key: string) => void;
+}) {
+  const active = findPreset(model, selected) ?? defaultPreset(model);
+  return (
+    <div className="space-y-1">
+      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
+      <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1 rounded-xl bg-gray-100 dark:bg-gray-800 p-1">
+        {model.thinking.presets.map((p) => {
+          const on = !!active && presetKey(p) === presetKey(active);
+          return (
+            <button
+              key={presetKey(p)}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              onClick={() => onSelect(presetKey(p))}
+              className={`flex-1 rounded-lg px-3 py-2 text-base font-semibold transition-colors ${
+                on ? 'bg-blue-600 text-white shadow' : 'text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-700'
+              }`}
+            >
+              {p.label}
+            </button>
+          );
+        })}
+      </div>
+      {model.thinking.note && <p className="text-sm text-gray-500 dark:text-gray-400">{model.thinking.note}</p>}
     </div>
   );
 }

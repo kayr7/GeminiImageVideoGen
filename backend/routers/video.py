@@ -74,12 +74,20 @@ def _resolve_video_model(requested: Optional[str]) -> Dict[str, Any]:
 
 
 def _require_frame_support(model_info: Dict[str, Any], feature: str) -> None:
+    """Reject first/last frame (``feature`` ending in 'frame') or reference-image input
+    that the chosen Veo model does not support."""
     ref_config = model_info.get("capabilities", {}).get("video_reference_images", {})
-    if not ref_config.get("enabled", False):
+    if feature.lower().startswith("reference"):
+        supported = ref_config.get("supports_reference_images", ref_config.get("enabled", False))
+    elif feature.lower().startswith("last"):
+        supported = ref_config.get("supports_end_frame", ref_config.get("enabled", False))
+    else:
+        supported = ref_config.get("supports_start_frame", ref_config.get("enabled", False))
+    if not supported:
         raise HTTPException(
             status_code=400,
             detail=f"{feature} is not supported by {model_info['id']}. "
-            f"Please use 'veo-3.1-generate-preview' (standard, not fast) for {feature.lower()} support.",
+            "Choose a Veo 3.1 or Veo 3.1 Fast model for reference images.",
         )
 
 
@@ -235,7 +243,10 @@ async def animate_image(
     try:
         image = _to_image(req.sourceImages[0])
         if len(req.sourceImages) > 1:
+            _require_frame_support(model_info, "Reference images")
             config_kwargs["reference_images"] = _to_reference_images(req.sourceImages[1:])
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid image data: {e}")
 

@@ -11,186 +11,126 @@ ModelInfoDict = Dict[str, Any]
 
 # Registry of all models understood by the backend. This mirrors the frontend constants so
 # configuration can expose the same options from a single source of truth.
+_RATIOS_10 = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]
+_RATIOS_14 = [
+    "1:1", "1:4", "1:8", "2:3", "3:2", "3:4",
+    "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9",
+]
+_TTS_VOICES = [
+    "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe",
+    "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome",
+    "Algenib", "Rasalgethi", "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux",
+    "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager",
+    "Sulafat",
+]
+
+
+def _image(model_id, name, description, price, max_refs, ratios):
+    return {
+        "id": model_id,
+        "name": name,
+        "description": description,
+        "price": price,
+        "priceUnit": "per image (1K)",
+        "tier": "paid",
+        "capabilities": {
+            "reference_images": {"enabled": True, "max": max_refs},
+            "sample_count": {"min": 1, "max": 1},
+            "aspect_ratios": list(ratios),
+        },
+    }
+
+
+def _video(model_id, name, description, price, resolutions, *, references):
+    return {
+        "id": model_id,
+        "name": name,
+        "description": description,
+        "price": price,
+        "priceUnit": "per second (720p)",
+        "pricePerVideo": round(price * 8, 2),
+        "tier": "paid",
+        "capabilities": {
+            "durations": [4, 6, 8],
+            "resolutions": list(resolutions),
+            "aspect_ratios": ["16:9", "9:16"],
+            "video_reference_images": {
+                "enabled": True,
+                "max": 3 if references else 0,
+                "supports_start_frame": True,
+                "supports_end_frame": True,
+                "supports_reference_images": references,
+            },
+        },
+    }
+
+
+def _speech(model_id, name, description, price):
+    return {
+        "id": model_id,
+        "name": name,
+        "description": description,
+        "price": price,
+        "priceUnit": "per generation",
+        "tier": "paid",
+        "capabilities": {"voices": list(_TTS_VOICES)},
+    }
+
+
+def _text(model_id, name, description, price, supports_temperature=False):
+    return {
+        "id": model_id,
+        "name": name,
+        "description": description,
+        "price": price,
+        "priceUnit": "per 1M input tokens",
+        "tier": "paid",
+        "capabilities": {"supports_temperature": supports_temperature},
+    }
+
+
 _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
     "image": [
-        {
-            "id": "gemini-3.1-flash-image-preview",
-            "name": "Nano Banana 2 (Gemini 3.1 Flash)",
-            "description": "Best image generation & editing — pro-level quality at flash speed",
-            "price": 0.067,
-            "priceUnit": "per image",
-            "tier": "paid",
-            "capabilities": {
-                "reference_images": {"enabled": True, "max": 10},
-                "sample_count": {"min": 1, "max": 1},
-                "aspect_ratios": [
-                    "1:1", "1:4", "1:8", "2:3", "3:2", "3:4",
-                    "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9",
-                ],
-            },
-        },
-        {
-            "id": "gemini-2.5-flash-image",
-            "name": "Nano Banana (Gemini 2.5 Flash)",
-            "description": "Fast, conversational image generation",
-            "price": 0.0387,
-            "priceUnit": "per image",
-            "tier": "paid",
-            "capabilities": {
-                "reference_images": {"enabled": True, "max": 3},
-                "sample_count": {"min": 1, "max": 1},
-                "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
-            },
-        },
-        {
-            "id": "gemini-3-pro-image-preview",
-            "name": "Nano Banana Pro (Gemini 3 Pro)",
-            "description": "Professional asset production, complex instructions",
-            "price": 0.14,
-            "priceUnit": "per image",
-            "tier": "paid",
-            "capabilities": {
-                "reference_images": {"enabled": True, "max": 14},
-                "sample_count": {"min": 1, "max": 1},
-                "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
-            },
-        },
-        {
-            "id": "imagen-4.0-ultra-generate-001",
-            "name": "Imagen 4.0 Ultra",
-            "description": "Highest quality Imagen — best prompt alignment, up to 2K",
-            "price": 0.06,
-            "priceUnit": "per image",
-            "tier": "paid",
-            "capabilities": {
-                "reference_images": {"enabled": False, "max": 0},
-                "sample_count": {"min": 1, "max": 4},
-                "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
-            },
-        },
-        {
-            "id": "imagen-4.0-generate-001",
-            "name": "Imagen 4.0",
-            "description": "High quality text-to-image generation, up to 2K",
-            "price": 0.04,
-            "priceUnit": "per image",
-            "tier": "paid",
-            "capabilities": {
-                "reference_images": {"enabled": False, "max": 0},
-                "sample_count": {"min": 1, "max": 4},
-                "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
-            },
-        },
-        {
-            "id": "imagen-4.0-fast-generate-001",
-            "name": "Imagen 4.0 Fast",
-            "description": "Speed-optimized image generation — cheapest option",
-            "price": 0.02,
-            "priceUnit": "per image",
-            "tier": "paid",
-            "capabilities": {
-                "reference_images": {"enabled": False, "max": 0},
-                "sample_count": {"min": 1, "max": 4},
-                "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
-            },
-        },
+        _image("gemini-nano-banana-2.1", "Nano Banana 2.1",
+               "Newest image model — fast, high quality generation & editing, up to 4K",
+               0.0336, 14, _RATIOS_10),
+        _image("gemini-3.1-flash-image", "Nano Banana 2 (Gemini 3.1 Flash)",
+               "Pro-level quality at flash speed, extended aspect ratios",
+               0.067, 14, _RATIOS_14),
+        _image("gemini-3.1-flash-lite-image", "Nano Banana 2 Lite",
+               "Cheapest current image model — quick drafts (1K only)",
+               0.0336, 14, _RATIOS_10),
+        _image("gemini-3-pro-image", "Nano Banana Pro (Gemini 3 Pro)",
+               "Professional asset production, complex instructions",
+               0.14, 14, _RATIOS_10),
+        _image("gemini-2.5-flash-image", "Nano Banana (Gemini 2.5 Flash, legacy)",
+               "Legacy fast image generation",
+               0.0387, 3, ["1:1", "3:4", "4:3", "9:16", "16:9"]),
     ],
     "video": [
-        {
-            "id": "veo-3.1-generate-preview",
-            "name": "Veo 3.1",
-            "description": "High quality 8s video with audio",
-            "price": 0.40,
-            "priceUnit": "per second",
-            "pricePerVideo": 3.20,
-            "tier": "paid",
-            "capabilities": {
-                "durations": [4, 6, 8],
-                "resolutions": ["720p", "1080p"],
-                "aspect_ratios": ["16:9", "9:16"],
-                "video_reference_images": {
-                    "enabled": True,
-                    "max": 1,
-                    "supports_start_frame": True,
-                    "supports_end_frame": True,
-                },
-            },
-        },
-        {
-            "id": "veo-3.1-fast-generate-preview",
-            "name": "Veo 3.1 Fast",
-            "description": "Fast 8s video with audio",
-            "price": 0.15,
-            "priceUnit": "per second",
-            "pricePerVideo": 1.20,
-            "tier": "paid",
-            "capabilities": {
-                "durations": [4, 6, 8],
-                "resolutions": ["720p", "1080p"],
-                "aspect_ratios": ["16:9", "9:16"],
-                "video_reference_images": {
-                    "enabled": True,
-                    "max": 1,
-                    "supports_start_frame": True,
-                    "supports_end_frame": True,
-                },
-            },
-        },
-        {
-            "id": "veo-3.0-generate-001",
-            "name": "Veo 3.0 (Stable)",
-            "description": "Stable 8s video with audio",
-            "price": 0.40,
-            "priceUnit": "per second",
-            "pricePerVideo": 3.20,
-            "tier": "paid",
-            "capabilities": {
-                "durations": [4, 6, 8],
-                "resolutions": ["720p", "1080p"],
-                "aspect_ratios": ["16:9", "9:16"],
-                "video_reference_images": {
-                    "enabled": True,
-                    "max": 1,
-                    "supports_start_frame": True,
-                    "supports_end_frame": True,
-                },
-            },
-        },
-        {
-            "id": "veo-3.0-fast-generate-001",
-            "name": "Veo 3.0 Fast (Stable)",
-            "description": "Fast stable 8s video with audio",
-            "price": 0.15,
-            "priceUnit": "per second",
-            "pricePerVideo": 1.20,
-            "tier": "paid",
-            "capabilities": {
-                "durations": [4, 6, 8],
-                "resolutions": ["720p", "1080p"],
-                "aspect_ratios": ["16:9", "9:16"],
-                "video_reference_images": {
-                    "enabled": False,
-                    "max": 0,
-                    "supports_start_frame": False,
-                    "supports_end_frame": False,
-                },
-            },
-        },
+        _video("veo-3.1-generate-preview", "Veo 3.1",
+               "High quality 8s video with audio", 0.40, ["720p", "1080p"], references=True),
+        _video("veo-3.1-fast-generate-preview", "Veo 3.1 Fast",
+               "Fast 8s video with audio", 0.10, ["720p", "1080p"], references=True),
+        _video("veo-3.1-lite-generate-preview", "Veo 3.1 Lite",
+               "Cheapest Veo — text/first/last frame only, no reference images",
+               0.05, ["720p", "1080p"], references=False),
     ],
     "speech": [
-        {
-            "id": "gemini-2.5-flash-preview-tts",
-            "name": "Gemini 2.5 Flash TTS",
-            "description": "Fast text-to-speech generation",
-            "price": 0.01,
-            "priceUnit": "per generation",
-            "tier": "paid",
-            "capabilities": {
-                "voices": [
-                    "Kore", "Puck", "Charon", "Aoede", "Fenrir"
-                ]
-            },
-        },
+        _speech("gemini-3.8-flash-tts", "Gemini 3.8 Flash TTS",
+                "Most expressive speech, multi-speaker dialogue", 0.005),
+        _speech("gemini-3.8-flash-lite-tts", "Gemini 3.8 Flash-Lite TTS",
+                "Cost-efficient text-to-speech", 0.003),
+    ],
+    "text": [
+        _text("gemini-3.8-flash", "Gemini 3.8 Flash",
+              "Newest Flash model — fast and capable", 0.75),
+        _text("gemini-3.6-flash", "Gemini 3.6 Flash",
+              "Previous-generation Flash model", 0.75),
+        _text("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite",
+              "Cheapest 3.x model for simple tasks", 0.30),
+        _text("gemini-2.5-flash", "Gemini 2.5 Flash",
+              "Legacy Flash; thinking can be fully disabled", 0.30, supports_temperature=True),
     ],
 }
 
@@ -239,7 +179,10 @@ def _apply_model_overrides(
         enabled_ids = [
             model_id for model_id in admin_enabled if model_id in available_ids
         ]
-    else:
+        if admin_enabled and not enabled_ids:
+            # Stored list only references retired model ids: ignore it entirely.
+            admin_enabled = None
+    if admin_enabled is None:
         enabled_env = set(_parse_csv(os.getenv(f"ENABLED_{category.upper()}_MODELS")))
         disabled_env = set(_parse_csv(os.getenv(f"DISABLED_{category.upper()}_MODELS")))
 
@@ -247,6 +190,8 @@ def _apply_model_overrides(
             enabled_ids = [
                 model_id for model_id in available_ids if model_id in enabled_env
             ]
+            if not enabled_ids:  # only retired ids configured: ignore the allow-list
+                enabled_ids = available_ids.copy()
         else:
             enabled_ids = available_ids.copy()
 

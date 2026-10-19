@@ -298,7 +298,7 @@ class ChatSessionManager:
         session_id: str,
         user_id: str,
         user_message: str,
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-3.8-flash",
     ) -> ChatMessage:
         """Send a message and get a response from Gemini."""
         # Get session

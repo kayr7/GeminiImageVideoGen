@@ -4,7 +4,11 @@ import { useState } from 'react';
 import SimpleMarkdown from './SimpleMarkdown';
 import type { RunState } from './types';
 
-const budgetLabel = (b: number) => (b === 0 ? 'off' : b < 0 ? 'dynamic' : `${b} tokens`);
+const thinkingStat = (u: { thinkingBudget: number | null; thinkingLevel: string | null }): { label: string; value: string } => {
+  if (u.thinkingLevel) return { label: 'Thinking', value: u.thinkingLevel };
+  const b = u.thinkingBudget;
+  return { label: 'Thinking budget', value: b === null || b === undefined ? 'default' : b === 0 ? 'off' : b < 0 ? 'dynamic' : String(b) };
+};
 const secs = (ms: number) => `${(ms / 1000).toFixed(2)} s`;
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -60,16 +64,20 @@ export default function OutputPane({ run, title }: { run: RunState; title?: stri
         </p>
       )}
 
-      {usage && (
+      {usage && (() => {
+        const t = thinkingStat(usage);
+        return (
         <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3" data-testid="stats">
           <Stat label="Input tokens" value={String(usage.promptTokens)} />
           <Stat label="Thinking tokens" value={String(usage.thoughtsTokens)} />
           <Stat label="Output tokens" value={String(usage.outputTokens)} />
           <Stat label="First token" value={secs(usage.firstTokenMs)} />
           <Stat label="Total time" value={secs(usage.latencyMs)} />
-          <Stat label="Model" value={`${usage.model} · thinking ${budgetLabel(usage.thinkingBudget)}`} />
+          <Stat label={t.label} value={t.value} />
+          <Stat label="Model" value={usage.model} />
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

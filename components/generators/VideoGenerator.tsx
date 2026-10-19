@@ -101,6 +101,14 @@ export default function VideoGenerator() {
     [availableVideoModels, model]
   );
 
+  const referenceCapableNames = useMemo(
+    () =>
+      availableVideoModels
+        .filter((m) => m.capabilities?.video_reference_images?.enabled)
+        .map((m) => m.name),
+    [availableVideoModels]
+  );
+
   const supportsAdvancedFrames = useMemo(() => {
     if (!selectedModel?.capabilities?.video_reference_images) return false;
     return selectedModel.capabilities.video_reference_images.enabled;
@@ -356,7 +364,7 @@ export default function VideoGenerator() {
       <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-6">
         <h2 className="text-xl font-semibold mb-2">No video models available</h2>
         <p className="text-sm">
-          All Veo models are disabled in the current configuration. Update your environment variables to enable at least one video model.
+          All video models are disabled in the current configuration. Update your environment variables to enable at least one video model.
         </p>
       </div>
     );
@@ -386,7 +394,7 @@ export default function VideoGenerator() {
           {/* Quota Display */}
           {token && <QuotaDisplay generationType="video" />}
           
-          <h2 className="text-2xl font-bold mb-4">Video Generation with Veo 3.1</h2>
+          <h2 className="text-2xl font-bold mb-4">Video Generation</h2>
 
           {/* Template Selector */}
           <TemplateSelector
@@ -442,8 +450,10 @@ export default function VideoGenerator() {
 
                 {!supportsAdvancedFrames && (
                   <div className="p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-800 dark:text-amber-200">
-                    ⚠️ Advanced image features are only supported by standard Veo models (e.g. <strong>veo-3.1-generate-preview</strong>).
-                    Switch models to use these features.
+                    ⚠️ Advanced image features (reference images, last frame) are not supported by the selected model
+                    {referenceCapableNames.length > 0 && (
+                      <> — try <strong>{referenceCapableNames.join(', ')}</strong></>
+                    )}.
                   </div>
                 )}
 
@@ -626,7 +636,7 @@ export default function VideoGenerator() {
               <li>• Video generation takes 11 seconds to 6 minutes</li>
               <li>• All videos are 8 seconds at 720p/1080p (24fps)</li>
               <li>• Be descriptive about motion, camera movement, and lighting</li>
-              <li>• Use Veo 3.1 Fast for quicker generation (~2x faster)</li>
+              <li>• Fast model variants generate quicker at slightly lower fidelity</li>
               <li>• Combine first+last frames OR first frame+reference images (not last+reference)</li>
               <li>• Negative prompts help avoid unwanted elements</li>
             </ul>

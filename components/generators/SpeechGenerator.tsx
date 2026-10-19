@@ -77,11 +77,19 @@ export default function SpeechGenerator() {
   );
 
   const availableVoices = useMemo<string[]>(() => {
-    if (!selectedModel?.capabilities?.voices) {
-        return ["Kore", "Puck", "Charon", "Aoede", "Fenrir"];
-    }
-    return selectedModel.capabilities.voices;
+    return selectedModel?.capabilities?.voices ?? [];
   }, [selectedModel]);
+
+  // Keep chosen voices valid for the selected model's capability list.
+  useEffect(() => {
+    if (availableVoices.length === 0) return;
+    setVoice((v) => (availableVoices.includes(v) ? v : availableVoices[0]));
+    setSpeakers((list) =>
+      list.map((sp, i) =>
+        availableVoices.includes(sp.voice) ? sp : { ...sp, voice: availableVoices[i % availableVoices.length] }
+      )
+    );
+  }, [availableVoices]);
 
   const speechGenerationEnabled = config ? config.features.speechGeneration : true;
 

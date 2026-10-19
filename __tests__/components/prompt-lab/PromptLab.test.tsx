@@ -9,31 +9,51 @@ import PromptLabPage from '@/app/prompt/page';
 import PromptLab from '@/components/prompt-lab/PromptLab';
 import type { PromptLabConfig } from '@/components/prompt-lab/types';
 
-const model = (canDisable: boolean) => ({
-  id: 'm1',
-  name: 'Model One',
+const budgetModel = {
+  id: 'gemini-2.5-flash',
+  name: 'Gemini 2.5 Flash',
   description: 'desc',
+  supportsTemperature: true,
   thinking: {
-    canDisable,
-    min: canDisable ? 0 : 128,
-    max: 24576,
-    defaultBudget: -1,
+    kind: 'budget' as const,
+    canDisable: true,
     presets: [
       { label: 'Off', budget: 0 },
       { label: 'Low', budget: 1024 },
+      { label: 'High', budget: 8192 },
       { label: 'Dynamic', budget: -1 },
     ],
+    default: { budget: -1 },
+    note: 'Only model where thinking is truly off',
   },
-});
+};
 
-const makeConfig = (over: Partial<PromptLabConfig> = {}, canDisable = true): PromptLabConfig => ({
+const levelModel = {
+  id: 'gemini-3.8-flash',
+  name: 'Gemini 3.8 Flash',
+  description: 'desc3',
+  supportsTemperature: false,
+  thinking: {
+    kind: 'level' as const,
+    canDisable: false,
+    presets: [
+      { label: 'Low', level: 'low' as const },
+      { label: 'Medium', level: 'medium' as const },
+      { label: 'High', level: 'high' as const },
+    ],
+    default: { level: 'medium' },
+    note: 'Lowest is low, no off',
+  },
+};
+
+const makeConfig = (over: Partial<PromptLabConfig> = {}): PromptLabConfig => ({
   enabled: true,
   expiresAt: null,
   maxInputTokens: 100,
   maxOutputTokens: 2048,
   allowHistory: true,
-  defaultModel: 'm1',
-  models: [model(canDisable)],
+  defaultModel: 'gemini-3.8-flash',
+  models: [levelModel, budgetModel],
   ...over,
 });
 
@@ -41,7 +61,7 @@ const jsonResponse = (data: unknown) => ({ ok: true, status: 200, json: async ()
 
 const sseResponse = () => {
   const bytes = new TextEncoder().encode(
-    'event: answer\ndata: {"text":"hi"}\n\nevent: usage\ndata: {"promptTokens":3,"thoughtsTokens":0,"outputTokens":1,"totalTokens":4,"firstTokenMs":100,"latencyMs":200,"model":"m1","thinkingBudget":0}\n\nevent: done\ndata: {}\n\n'
+    'event: answer\ndata: {"text":"hi"}\n\nevent: usage\ndata: {"promptTokens":3,"thoughtsTokens":0,"outputTokens":1,"totalTokens":4,"firstTokenMs":100,"latencyMs":200,"model":"m1","thinkingBudget":null,"thinkingLevel":"low"}\n\nevent: done\ndata: {}\n\n'
   );
   let sent = false;
   return {
@@ -58,6 +78,10 @@ const mockFetch = (config: PromptLabConfig) => {
   );
 };
 
+beforeEach(() => {
+  (global.fetch as jest.Mock).mockReset();
+});
+
 describe('Prompt Lab page', () => {
   it('shows the inactive view when disabled', async () => {
     mockFetch(makeConfig({ enabled: false }));
@@ -73,19 +97,35 @@ describe('Prompt Lab page', () => {
   });
 });
 
+const generateBodies = () =>
+  (global.fetch as jest.Mock).mock.calls
+    .filter(([u]) => String(u).includes('/generate'))
+    .map(([, init]) => JSON.parse(init.body));
+
 describe('Prompt Lab controls', () => {
-  it('renders thinking presets with Off enabled when model can disable', () => {
+  it('renders level presets and the note, without Off', () => {
     render(<PromptLab config={makeConfig()} onInactive={() => {}} />);
-    expect(screen.getByRole('radio', { name: 'Off' })).toBeEnabled();
     expect(screen.getByRole('radio', { name: 'Low' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'High' })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Off' })).toBeNull();
+    expect(screen.getByText(/no off/i)).toBeInTheDocument();
+    expect(screen.getByText(/Gemini 2.5 Flash · Off/)).toBeInTheDocument();
+  });
+
+  it('renders Off for budget models', () => {
+    render(<PromptLab config={makeConfig({ defaultModel: 'gemini-2.5-flash' })} onInactive={() => {}} />);
+    expect(screen.getByRole('radio', { name: 'Off' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Dynamic' })).toBeInTheDocument();
   });
 
-  it('disables Off when the model cannot disable thinking', () => {
-    render(<PromptLab config={makeConfig({}, false)} onInactive={() => {}} />);
-    const off = screen.getByRole('radio', { name: 'Off' });
-    expect(off).toBeDisabled();
-    expect(off).toHaveAttribute('title', 'This model always thinks');
+  it('hides temperature for models without support', () => {
+    const { unmount } = render(<PromptLab config={makeConfig()} onInactive={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /show advanced/i }));
+    expect(screen.queryByLabelText('Temperature')).toBeNull();
+    unmount();
+    render(<PromptLab config={makeConfig({ defaultModel: 'gemini-2.5-flash' })} onInactive={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /show advanced/i }));
+    expect(screen.getByLabelText('Temperature')).toBeInTheDocument();
   });
 
   it('blocks sending when input exceeds the token limit', () => {
@@ -97,21 +137,50 @@ describe('Prompt Lab controls', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
   });
 
-  it('compare mode issues two requests with budgets 0 and the selected one', async () => {
+  it('sends {level} and no temperature for a level model', async () => {
     mockFetch(makeConfig());
     render(<PromptLab config={makeConfig()} onInactive={() => {}} />);
-    fireEvent.click(screen.getByRole('radio', { name: 'Low' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'High' }));
+    fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'hello' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    });
+    await waitFor(() => expect(generateBodies()).toHaveLength(1));
+    const body = generateBodies()[0];
+    expect(body.thinking).toEqual({ level: 'high' });
+    expect(body).not.toHaveProperty('temperature');
+    expect(await screen.findByText('low')).toBeInTheDocument();
+  });
+
+  it('compare defaults to 2.5 Flash Off vs the selected model at high', async () => {
+    mockFetch(makeConfig());
+    render(<PromptLab config={makeConfig()} onInactive={() => {}} />);
     fireEvent.click(screen.getByLabelText('Compare thinking'));
     fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'hello' } });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
     });
-    await waitFor(() => {
-      const calls = (global.fetch as jest.Mock).mock.calls.filter(([u]) => String(u).includes('/generate'));
-      expect(calls).toHaveLength(2);
-      const budgets = calls.map(([, init]) => JSON.parse(init.body).thinking.budget).sort((a, b) => a - b);
-      expect(budgets).toEqual([0, 1024]);
-    });
+    await waitFor(() => expect(generateBodies()).toHaveLength(2));
+    const bodies = generateBodies();
+    const left = bodies.find((b) => b.model === 'gemini-2.5-flash');
+    const right = bodies.find((b) => b.model === 'gemini-3.8-flash');
+    expect(left.thinking).toEqual({ budget: 0 });
+    expect(right.thinking).toEqual({ level: 'high' });
+    expect(await screen.findByText('Gemini 2.5 Flash · Off')).toBeInTheDocument();
+    expect(screen.getByText('Gemini 3.8 Flash · High')).toBeInTheDocument();
     expect((await screen.findAllByText('hi')).length).toBe(2);
+  });
+
+  it('compare falls back to the lowest preset when 2.5 Flash is not allowed', async () => {
+    const cfg = makeConfig({ models: [levelModel] });
+    mockFetch(cfg);
+    render(<PromptLab config={cfg} onInactive={() => {}} />);
+    fireEvent.click(screen.getByLabelText('Compare thinking'));
+    fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'hello' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
+    });
+    await waitFor(() => expect(generateBodies()).toHaveLength(2));
+    expect(generateBodies().map((b) => b.thinking.level).sort()).toEqual(['high', 'low']);
   });
 });

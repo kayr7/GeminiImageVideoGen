@@ -133,10 +133,6 @@ class FakeModels:
         part = NS(inline_data=NS(data=PNG, mime_type="image/jpeg"))
         return NS(candidates=[NS(finish_reason="STOP", content=NS(parts=[part]))])
 
-    def generate_images(self, model, prompt, config):
-        self.calls["generate_images"] = NS(model=model, prompt=prompt, config=config)
-        return NS(generated_images=[NS(image=NS(image_bytes=PNG, mime_type="image/png"))])
-
 
 @pytest.fixture
 def fake_gemini(monkeypatch):

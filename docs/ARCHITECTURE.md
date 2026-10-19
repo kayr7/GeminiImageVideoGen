@@ -32,7 +32,7 @@ only in the backend; the browser never sees it.
 | `routers/users.py`, `quotas.py`, `admin.py` | Admin: users and tags, quotas, model enable/disable |
 | `routers/templates.py`, `system_prompts.py` | Saved prompts and system prompts |
 | `routers/config.py`, `usage.py` | Model/feature configuration and usage status for the UI |
-| `utils/config.py` | Model registry (capabilities, prices), env and admin overrides, feature flags |
+| `utils/config.py` | Model registry for `image`, `video`, `speech` and `text` (capabilities, prices), env and admin overrides (ids no longer in the registry are ignored), feature flags |
 | `utils/admin_config.py` | Persists admin model overrides to `data/admin-config.json` |
 | `utils/database.py` | SQLite schema and migrations (`.data/app.db`) |
 | `utils/user_manager.py`, `session.py`, `auth.py` | Users, bearer-token sessions (24 h), auth dependencies |
@@ -55,7 +55,7 @@ Templates store prompt text with `{{variable}}` placeholders per media type (tex
 
 ## Prompt Lab
 
-A public (no login) prompting playground for lectures, active only while an admin enables it (optionally with an expiry). Code: `routers/prompt_lab.py` (public `/api/prompt-lab/config`, `/generate`; admin `/api/admin/prompt-lab`) and `utils/prompt_lab.py` (model registry with thinking-budget rules, settings, limits, stats).
+A public (no login) prompting playground for lectures, active only while an admin enables it (optionally with an expiry). Code: `routers/prompt_lab.py` (public `/api/prompt-lab/config`, `/generate`; admin `/api/admin/prompt-lab`) and `utils/prompt_lab.py` (model registry with thinking rules, settings, limits, stats). Models use either a token `budget` (2.5 Flash) or a `level` (Gemini 3.x/4: minimal/low/medium/high); the request sends `thinking: {budget}` or `thinking: {level}`, and temperature is only forwarded for models with `supportsTemperature`.
 
 - **Settings** live in the `promptLab` section of the admin config JSON (`admin_config.get_admin_section/store_admin_section`), cached in memory with an mtime check. Expired means disabled.
 - **Streaming**: `/generate` is an `async def` endpoint using the async SDK (`client.aio.models.generate_content_stream`) and answers with SSE (`thought`, `answer`, `usage`, `error`, `done` events, `: ping` heartbeats). Nothing blocks the event loop or uses the sync threadpool per request (only one small SQLite stats write at the end).

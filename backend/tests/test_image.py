@@ -4,7 +4,7 @@ import base64
 from tests.conftest import PNG
 from utils.quota_manager import QuotaManager
 
-NANO = "gemini-3.1-flash-image-preview"
+NANO = "gemini-nano-banana-2.1"
 IMAGEN = "imagen-4.0-generate-001"
 REF = "data:image/webp;base64," + base64.b64encode(PNG).decode()
 
@@ -38,27 +38,16 @@ def test_nano_banana_response_and_mime_passthrough(client, user_a, fake_gemini):
     assert _used(user) == 1
 
 
-def test_imagen_uses_generate_images_with_negative_prompt(client, user_a, fake_gemini):
+def test_imagen_is_gone_and_negative_prompt_ignored(client, user_a, fake_gemini):
     _, h = user_a
+    r = client.post("/api/image/generate", headers=h, json={"prompt": "cat", "model": IMAGEN})
+    assert r.status_code == 400
     r = client.post(
         "/api/image/generate", headers=h,
-        json={"prompt": "cat", "model": IMAGEN, "negativePrompt": "blur"},
+        json={"prompt": "cat", "model": NANO, "negativePrompt": "blur"},
     )
     assert r.status_code == 200, r.text
-    assert "generate_content" not in fake_gemini.calls
-    call = fake_gemini.calls["generate_images"]
-    assert call.model == IMAGEN and call.prompt == "cat"
-    assert call.config.negative_prompt == "blur"
-    assert r.json()["data"]["imageUrl"].startswith("data:image/png;base64,")
-
-
-def test_imagen_rejects_reference_images(client, user_a, fake_gemini):
-    _, h = user_a
-    r = client.post(
-        "/api/image/generate", headers=h,
-        json={"prompt": "cat", "model": IMAGEN, "referenceImages": [REF]},
-    )
-    assert r.status_code == 400
+    assert "generate_images" not in fake_gemini.calls
 
 
 def test_unknown_model_400(client, user_a, fake_gemini):

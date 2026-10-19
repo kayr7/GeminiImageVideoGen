@@ -29,6 +29,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _ensure_wav(audio: bytes, mime_type: str) -> bytes:
+    """Return WAV bytes: 3.8 TTS models already answer with WAV, 2.5 with raw 24 kHz PCM."""
+    if audio[:4] == b"RIFF" or mime_type.lower() in ("audio/wav", "audio/x-wav", "audio/wave"):
+        return audio
+    rate = 24000
+    for token in mime_type.split(";"):
+        token = token.strip().lower()
+        if token.startswith("rate="):
+            try:
+                rate = int(token[5:])
+            except ValueError:
+                pass
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(rate)
+        wf.writeframes(audio)
+    return buffer.getvalue()
+
+
 @router.post("/generate", response_model=SuccessResponse)
 def generate_speech(
     req: SpeechGenerationRequest,
@@ -128,9 +149,11 @@ def generate_speech(
             )
 
         audio_data = None
+        audio_mime = ""
         for part in candidate.content.parts:
             if hasattr(part, "inline_data") and part.inline_data:
                 audio_data = part.inline_data.data
+                audio_mime = part.inline_data.mime_type or ""
                 break
         
         if not audio_data:
@@ -139,15 +162,7 @@ def generate_speech(
                 detail="No audio data found in response.",
             )
 
-        # Convert PCM to WAV
-        wav_buffer = io.BytesIO()
-        with wave.open(wav_buffer, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(24000)
-            wf.writeframes(audio_data)
-            
-        wav_bytes = wav_buffer.getvalue()
+        wav_bytes = _ensure_wav(audio_data, audio_mime)
         wav_base64 = to_base64(wav_bytes)
 
         # Save to storage

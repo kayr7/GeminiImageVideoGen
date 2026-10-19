@@ -7,7 +7,7 @@ def test_config_endpoint_has_models(client):
     r = client.get("/api/config")
     assert r.status_code == 200
     models = r.json()["data"]["models"]
-    for category in ("image", "video", "speech"):
+    for category in ("image", "video", "speech", "text"):
         assert models[category]["enabled"], category
         assert all("id" in m for m in models[category]["enabled"])
 
@@ -27,3 +27,51 @@ def test_resolve_unknown_model_raises():
 def test_resolve_unknown_category_raises():
     with pytest.raises(LookupError):
         resolve_model_choice("nonexistent", None)
+
+
+def test_text_models_registered():
+    assert resolve_model_choice("text", None)["id"] == "gemini-3.8-flash"
+
+
+def test_stale_admin_overrides_fall_back_to_first_valid_model():
+    from utils.admin_config import store_admin_model_settings
+    from utils.config import get_model_configuration
+
+    store_admin_model_settings("image", {
+        "enabled": ["imagen-4.0-generate-001"],
+        "disabled": ["gemini-nano-banana-2.1"],
+        "default": "imagen-4.0-generate-001",
+    })
+    cfg = get_model_configuration()["image"]
+    ids = [m["id"] for m in cfg["enabled"]]
+    assert "imagen-4.0-generate-001" not in ids
+    assert cfg["default"] in ids
+    assert resolve_model_choice("image", None)["id"] == ids[0]
+
+    store_admin_model_settings("video", {
+        "enabled": ["veo-3.1-fast-generate-preview", "veo-3.0-generate-001"],
+        "default": "veo-3.0-generate-001",
+    })
+    cfg = get_model_configuration()["video"]
+    assert [m["id"] for m in cfg["enabled"]] == ["veo-3.1-fast-generate-preview"]
+    assert cfg["default"] == "veo-3.1-fast-generate-preview"
+
+
+def test_text_endpoint_rejects_unknown_model(client, make_user, fake_gemini):
+    _, h = make_user("t@test.de", quotas={"text": ("limited", 5)})
+    r = client.post("/api/text/generate", headers=h,
+                    json={"userMessage": "hi", "model": "gemini-2.0-flash-exp"})
+    assert r.status_code == 400
+
+
+def test_speech_wav_passthrough_and_pcm_wrap():
+    import io, wave
+    from routers.speech import _ensure_wav
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(24000); wf.writeframes(b"\0\0")
+    wav = buf.getvalue()
+    assert _ensure_wav(wav, "audio/wav") == wav
+    wrapped = _ensure_wav(b"\x01\x00\x02\x00", "audio/L16;codec=pcm;rate=24000")
+    assert wrapped[:4] == b"RIFF" and wrapped != b"\x01\x00\x02\x00"

@@ -104,11 +104,22 @@ def test_disabled_then_admin_enables(client, admin_headers, fake):
     assert r.status_code == 200, r.text
     d = r.json()["data"]
     assert d["settings"]["enabled"] and d["settings"]["expiresAt"].endswith("Z")
-    assert len(d["availableModels"]) == 3 and d["stats"]["activeRequests"] == 0
+    assert len(d["availableModels"]) == 5 and d["stats"]["activeRequests"] == 0
 
     cfg = client.get("/api/prompt-lab/config").json()["data"]
     assert cfg["enabled"] and cfg["maxInputTokens"] == 10000
-    assert [m["id"] for m in cfg["models"]] == ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    assert [m["id"] for m in cfg["models"]] == [
+        "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
+    assert cfg["defaultModel"] == "gemini-3.8-flash"
+    m38 = cfg["models"][0]
+    assert m38["supportsTemperature"] is False
+    assert m38["thinking"]["kind"] == "level" and m38["thinking"]["canDisable"] is False
+    assert [p["level"] for p in m38["thinking"]["presets"]] == ["low", "medium", "high"]
+    assert m38["thinking"]["default"] == {"level": "medium"}
+    m25 = cfg["models"][3]
+    assert m25["supportsTemperature"] is True and m25["thinking"]["kind"] == "budget"
+    assert m25["thinking"]["presets"][0] == {"label": "Off", "budget": 0}
+    assert m25["thinking"]["presets"][-1]["budget"] == -1
     assert gen(client).status_code == 200
 
     r = client.put("/api/admin/prompt-lab", json={"enabled": False}, headers=admin_headers)
@@ -136,10 +147,11 @@ def test_admin_auth(client, user_a):
 def test_admin_validation(client, admin_headers):
     put = lambda b: client.put("/api/admin/prompt-lab", json=b, headers=admin_headers)
     assert put({"allowedModels": ["nope"]}).status_code == 400
-    assert put({"allowedModels": ["gemini-2.5-pro"], "defaultModel": "gemini-2.5-flash"}).status_code == 400
+    assert put({"allowedModels": ["gemini-2.5-pro"]}).status_code == 400  # removed model
+    assert put({"allowedModels": ["gemini-4-argon"], "defaultModel": "gemini-2.5-flash"}).status_code == 400
     assert put({"maxOutputTokens": 10}).status_code == 422
-    r = put({"allowedModels": ["gemini-2.5-pro"]})
-    assert r.json()["data"]["settings"]["defaultModel"] == "gemini-2.5-pro"
+    r = put({"allowedModels": ["gemini-4-argon"]})
+    assert r.json()["data"]["settings"]["defaultModel"] == "gemini-4-argon"
 
 
 def test_sse_order_and_headers(client, fake):
@@ -153,6 +165,7 @@ def test_sse_order_and_headers(client, fake):
     assert usage["promptTokens"] == 7 and usage["thoughtsTokens"] == 3
     assert usage["outputTokens"] == 5 and usage["totalTokens"] == 15
     assert usage["model"] == "gemini-2.5-flash" and usage["thinkingBudget"] == -1
+    assert usage["thinkingLevel"] is None
     assert "firstTokenMs" in usage and "latencyMs" in usage
     cfg = fake.calls[0].config
     assert cfg.thinking_config.include_thoughts is True
@@ -169,16 +182,50 @@ def test_include_thoughts_false_and_budget_zero(client, fake):
 
 
 def test_budget_validation(client, fake):
-    enable(allowedModels=["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"])
-    assert gen(client, body(model="gemini-2.5-pro", thinking={"budget": 0})).status_code == 400
-    assert gen(client, body(model="gemini-2.5-flash-lite", thinking={"budget": 100})).status_code == 400
+    enable(allowedModels=["gemini-2.5-flash", "gemini-4-argon"])
+    assert gen(client, body(thinking={"budget": 0})).status_code == 200
     assert gen(client, body(thinking={"budget": 99999})).status_code == 400
     assert gen(client, body(thinking={"budget": -5})).status_code == 400
-    assert gen(client, body(model="gemini-2.5-flash-lite", thinking={"budget": 512})).status_code == 200
-    assert gen(client, body(model="gemini-2.5-pro", thinking={"budget": -1})).status_code == 200
+    assert gen(client, body(thinking={"budget": 1024})).status_code == 200
     r = gen(client, body(model="gemini-1.5-pro"))
     assert r.status_code == 400 and isinstance(r.json()["detail"], str)
     assert fake.calls and len(fake.calls) == 2
+
+
+def test_level_validation_and_kind_mismatch(client, fake):
+    enable(allowedModels=["gemini-3.8-flash", "gemini-3.6-flash", "gemini-2.5-flash"])
+    lvl = lambda m, t: gen(client, body(model=m, thinking=t)).status_code
+    assert lvl("gemini-3.8-flash", {"level": "minimal"}) == 400
+    assert lvl("gemini-3.8-flash", {"level": "bogus"}) == 400
+    assert lvl("gemini-3.8-flash", {"budget": 1024}) == 400
+    assert lvl("gemini-3.8-flash", {}) == 400
+    assert lvl("gemini-3.8-flash", {"level": "low", "budget": 0}) == 400
+    assert lvl("gemini-2.5-flash", {"level": "low"}) == 400
+    assert lvl("gemini-3.6-flash", {"level": "minimal"}) == 200
+    assert lvl("gemini-3.8-flash", {"level": "high"}) == 200
+    tc = fake.calls[-1].config.thinking_config
+    assert str(tc.thinking_level.value) == "HIGH" and tc.thinking_budget is None
+    assert tc.include_thoughts is True
+
+
+def test_level_usage_event_and_temperature(client, fake):
+    enable(allowedModels=["gemini-3.8-flash", "gemini-2.5-flash"])
+    r = gen(client, body(model="gemini-3.8-flash", thinking={"level": "low"}, temperature=0.5))
+    usage = [e for e in parse_sse(r.text) if e[0] == "usage"][0][1]
+    assert usage["thinkingLevel"] == "low" and usage["thinkingBudget"] is None
+    assert fake.calls[-1].config.temperature is None
+    gen(client, body(temperature=0.5))
+    assert fake.calls[-1].config.temperature == 0.5
+
+
+def test_stale_stored_settings_fall_back():
+    enable(allowedModels=["gemini-2.5-pro"], defaultModel="gemini-2.5-pro")
+    s = lab.get_settings()
+    assert s["allowedModels"] == lab.DEFAULT_SETTINGS["allowedModels"]
+    assert s["defaultModel"] == "gemini-3.8-flash"
+    enable(allowedModels=["gemini-2.5-pro", "gemini-3.6-flash"], defaultModel="gemini-2.5-pro")
+    s = lab.get_settings()
+    assert s["allowedModels"] == ["gemini-3.6-flash"] and s["defaultModel"] == "gemini-3.6-flash"
 
 
 def test_message_validation(client, fake):

@@ -76,7 +76,7 @@ class TextGenerationManager:
         system_prompt_id: Optional[str] = None,
         template_id: Optional[str] = None,
         variable_values: Optional[Dict[str, str]] = None,
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-3.8-flash",
         ip_address: Optional[str] = None,
     ) -> TextGeneration:
         """Generate text using Gemini API (single-turn)."""

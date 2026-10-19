@@ -28,10 +28,12 @@ The source of truth is `_MODEL_REGISTRY` in `backend/utils/config.py` (exposed a
 
 | Model | Reference/frame inputs |
 |---|---|
-| `veo-3.1-generate-preview`, `veo-3.1-fast-generate-preview`, `veo-3.0-generate-001` | enabled (start and end frame) |
-| `veo-3.0-fast-generate-001` | disabled |
+| `veo-3.1-generate-preview`, `veo-3.1-fast-generate-preview` | start frame, end frame and up to 3 reference images |
+| `veo-3.1-lite-generate-preview` | start and end frame only; no reference images, no extension |
 
-All listed models offer durations 4/6/8 s, 720p/1080p, and 16:9 / 9:16.
+Veo 3.0 models are no longer offered. All listed models offer durations 4/6/8 s, 720p/1080p
+(1080p and reference images require 8 s) and 16:9 / 9:16. The registry flags
+`supports_start_frame`, `supports_end_frame` and `supports_reference_images` drive validation.
 Admins can enable or disable models in the admin UI or via `ENABLED_VIDEO_MODELS` / `DISABLED_VIDEO_MODELS`.
 
 ## Troubleshooting `400 INVALID_ARGUMENT`
