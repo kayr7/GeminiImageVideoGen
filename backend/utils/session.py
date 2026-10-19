@@ -10,6 +10,10 @@ from models import LoginUser
 from .database import get_connection
 
 
+# Only touch last_activity_at when it is older than this.
+ACTIVITY_UPDATE_INTERVAL = timedelta(minutes=5)
+
+
 class _SessionManager:
     """Manage short-lived bearer tokens for authenticated users in database."""
 
@@ -39,7 +43,7 @@ class _SessionManager:
             # Get session
             row = conn.execute(
                 """
-                SELECT s.user_id, s.expires_at, u.email, u.is_admin, u.is_active
+                SELECT s.user_id, s.expires_at, s.last_activity_at, u.email, u.is_admin, u.is_active
                 FROM user_sessions s
                 JOIN users u ON s.user_id = u.id
                 WHERE s.token = ?
@@ -62,12 +66,14 @@ class _SessionManager:
             if not bool(row["is_active"]):
                 return None
 
-            # Update last activity
-            conn.execute(
-                "UPDATE user_sessions SET last_activity_at = ? WHERE token = ?",
-                (datetime.utcnow().isoformat(), token),
-            )
-            conn.commit()
+            # Update last activity (throttled: a write per request is expensive)
+            now = datetime.utcnow()
+            if self._activity_is_stale(row["last_activity_at"], now):
+                conn.execute(
+                    "UPDATE user_sessions SET last_activity_at = ? WHERE token = ?",
+                    (now.isoformat(), token),
+                )
+                conn.commit()
 
             # Return LoginUser
             roles = ["admin"] if bool(row["is_admin"]) else []
@@ -76,6 +82,15 @@ class _SessionManager:
                 displayName=row["email"],
                 roles=roles,
             )
+
+    @staticmethod
+    def _activity_is_stale(last_activity_at: Optional[str], now: datetime) -> bool:
+        if not last_activity_at:
+            return True
+        try:
+            return now - datetime.fromisoformat(last_activity_at) >= ACTIVITY_UPDATE_INTERVAL
+        except ValueError:
+            return True
 
     def invalidate(self, token: str) -> None:
         """Invalidate a session."""

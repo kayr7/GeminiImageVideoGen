@@ -86,3 +86,27 @@ def test_jobs_lists_only_own_without_video_data(client, user_a, user_b, fake_vid
 
     one = client.get(f"/api/video/jobs/{ja}", headers=ha).json()["data"]
     assert one["id"] == ja and one["videoUrl"].startswith("data:video/mp4")
+
+
+def test_job_inputs_moved_to_files_on_completion(client, user_a, fake_video):
+    import base64, json
+    from tests.conftest import PNG
+    from utils.database import get_connection
+
+    user, ha = user_a
+    data_url = "data:image/png;base64," + base64.b64encode(PNG).decode()
+    r = client.post("/api/video/animate", json={"prompt": "go", "model": "", "sourceImages": [data_url]}, headers=ha)
+    assert r.status_code == 200, r.text
+    jid = r.json()["data"]["jobId"]
+    with get_connection() as conn:
+        assert "data:image" in conn.execute("SELECT details FROM video_jobs").fetchone()[0]
+
+    mid = client.get("/api/video/status", params={"jobId": jid}, headers=ha).json()["data"]["mediaId"]
+    with get_connection() as conn:
+        job_details = conn.execute("SELECT details FROM video_jobs").fetchone()[0]
+        media_details = conn.execute("SELECT details FROM media WHERE id = ?", (mid,)).fetchone()[0]
+    assert "data:image" not in job_details and "data:image" not in media_details
+    assert json.loads(media_details)["mode"] == "animate"
+    item = client.get("/api/media/list", headers=ha).json()["data"]["media"][0]
+    assert len(item["details"]["sourceImages"]) == 1
+    assert client.get(item["details"]["sourceImages"][0]).status_code == 200

@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Iterable
 
-DB_DIR = Path(__file__).parent.parent / ".data"
+# DATA_DIR overrides the default location (read at import time).
+DB_DIR = Path(os.environ.get("DATA_DIR") or Path(__file__).parent.parent / ".data")
 DB_FILE = DB_DIR / "app.db"
 
 MIGRATIONS: list[tuple[int, Iterable[str]]] = [

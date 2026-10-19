@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from utils import media_inputs
 from utils.database import get_connection, initialize_database
 
 
@@ -18,6 +19,13 @@ _UPDATABLE_COLUMNS = {
     "error": "error",
     "mediaId": "media_id",
 }
+
+
+# Explicit column list: legacy rows may hold huge video_url/video_data blobs that are never read.
+_JOB_COLUMNS = (
+    "id, job_id, operation_id, user_id, prompt, model, mode, status, progress, error, "
+    "details, media_id, ip_address, created_at, updated_at, completed_at"
+)
 
 
 class VideoQueue:
@@ -99,7 +107,7 @@ class VideoQueue:
             conn.commit()
 
             row = conn.execute(
-                "SELECT * FROM video_jobs WHERE id = ?",
+                f"SELECT {_JOB_COLUMNS} FROM video_jobs WHERE id = ?",
                 (internal_id,),
             ).fetchone()
 
@@ -138,6 +146,13 @@ class VideoQueue:
             fields.append("completed_at = ?")
             values.append(None)
 
+        # Input images are only needed until the job is finished: drop them from the row.
+        if "details" not in updates and updates.get("status") in ("completed", "failed"):
+            current = self.get_job(internal_id)
+            if current and media_inputs.has_inline_inputs(current.get("details")):
+                fields.append("details = ?")
+                values.append(json.dumps(media_inputs.strip_inline_inputs(current["details"])))
+
         values.append(internal_id)
 
         query = f"UPDATE video_jobs SET {', '.join(fields)} WHERE id = ?"
@@ -146,7 +161,7 @@ class VideoQueue:
             conn.execute(query, values)
             conn.commit()
             row = conn.execute(
-                "SELECT * FROM video_jobs WHERE id = ?",
+                f"SELECT {_JOB_COLUMNS} FROM video_jobs WHERE id = ?",
                 (internal_id,),
             ).fetchone()
 
@@ -160,7 +175,7 @@ class VideoQueue:
 
         with get_connection() as conn:
             row = conn.execute(
-                "SELECT * FROM video_jobs WHERE id = ?",
+                f"SELECT {_JOB_COLUMNS} FROM video_jobs WHERE id = ?",
                 (internal_id,),
             ).fetchone()
 
@@ -170,7 +185,7 @@ class VideoQueue:
         """List all jobs for a user, newest first (timestamps as ISO strings)."""
         with get_connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM video_jobs WHERE user_id = ? ORDER BY datetime(created_at) DESC",
+                f"SELECT {_JOB_COLUMNS} FROM video_jobs WHERE user_id = ? ORDER BY datetime(created_at) DESC",
                 (user_id,),
             ).fetchall()
 

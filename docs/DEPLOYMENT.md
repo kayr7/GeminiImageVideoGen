@@ -91,6 +91,24 @@ git pull
 docker-compose up --build -d
 ```
 
+### One-time: slim the database (installs created before the fast gallery)
+
+Older versions stored students' reference images as base64 inside the SQLite
+database, which made it several GB and the gallery slow. The new code serves those
+rows fine, but moving the images to files gives the full speed-up and shrinks the DB:
+
+```bash
+docker-compose stop backend
+cp -a backend/.data backend/.data.bak && cp -a backend/.media-storage backend/.media-storage.bak
+docker-compose run --rm backend python scripts/migrate_media_inputs.py \
+  --data-dir /app/.data --media-dir /app/.media-storage --dry-run --i-know-this-is-live
+docker-compose run --rm backend python scripts/migrate_media_inputs.py \
+  --data-dir /app/.data --media-dir /app/.media-storage --vacuum --i-know-this-is-live
+docker-compose up -d backend
+```
+
+The script is idempotent. VACUUM needs free disk space roughly equal to the DB size.
+
 ## 5. Troubleshooting
 
 | Symptom | Fix |

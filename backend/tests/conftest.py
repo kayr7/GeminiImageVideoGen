@@ -13,6 +13,11 @@ from types import SimpleNamespace as NS
 os.environ["GEMINI_API_KEY"] = "test-key"
 os.environ["APP_USERNAME"] = "admin@test.de"
 os.environ["APP_PASSWORD"] = "Passw0rd!Passw0rd"
+# Import-time path overrides: even if something imported early, it can't hit real data.
+import tempfile as _tempfile
+_IMPORT_TMP = _tempfile.mkdtemp(prefix="gemini-tests-")
+os.environ["DATA_DIR"] = os.path.join(_IMPORT_TMP, "data")
+os.environ["MEDIA_STORAGE_DIR"] = os.path.join(_IMPORT_TMP, "media")
 for _k in ("ADMIN_USERNAME", "ADMIN_PASSWORD", "LOGIN_USERNAME", "LOGIN_PASSWORD"):
     os.environ.pop(_k, None)
 
@@ -55,9 +60,8 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.setattr(media_storage, "AUDIO_DIR", root / "audio")
     monkeypatch.setattr(media_storage, "THUMBNAILS_DIR", root / "thumbnails")
     monkeypatch.setattr(media_storage, "_storage_instance", None)
-    # routers.media imported THUMBNAILS_DIR by name
-    import routers.media as media_router
-    monkeypatch.setattr(media_router, "THUMBNAILS_DIR", root / "thumbnails")
+    # Never fall back to a real secret/db location; signed URLs use a test secret.
+    monkeypatch.setenv("MEDIA_URL_SECRET", "test-secret")
 
     monkeypatch.setattr(admin_config, "_CONFIG_PATH", tmp_path / "admin-config.json")
     monkeypatch.setenv("ADMIN_CONFIG_PATH", str(tmp_path / "admin-config.json"))
