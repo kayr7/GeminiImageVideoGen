@@ -1,8 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import CompareSide, { type SideState } from './CompareSide';
 import OutputPane from './OutputPane';
 import SimpleMarkdown from './SimpleMarkdown';
+import SystemPromptField from './SystemPromptField';
+import ThinkingControl from './ThinkingControl';
 import TokenMeter from './TokenMeter';
 import { PromptLabError, streamGenerate } from './client';
 import { COT_SUFFIX, EXAMPLES, FEW_SHOT_SCAFFOLD, ROLE_SCAFFOLD } from './examples';
@@ -13,6 +16,7 @@ import {
   type RunState,
   COMPARE_OFF_MODEL,
   defaultPreset,
+  estimateTokens,
   findPreset,
   highestFixedPreset,
   isThinkingOff,
@@ -42,7 +46,7 @@ export default function PromptLab({ config, onInactive }: Props) {
   const [presetSel, setPresetSel] = useState<string>(() => (model ? presetKey(defaultPreset(model) ?? { label: '' }) : ''));
   const [showThoughts, setShowThoughts] = useState(true);
   const [system, setSystem] = useState('');
-  const [sysOpen, setSysOpen] = useState(false);
+  const [advOpen, setAdvOpen] = useState(false);
   const [temperature, setTemperature] = useState<number | null>(null);
   const [mode, setMode] = useState<'single' | 'chat'>('single');
   const [compare, setCompare] = useState(false);
@@ -58,30 +62,30 @@ export default function PromptLab({ config, onInactive }: Props) {
   const running = left.status === 'running' || right.status === 'running';
   const preset = findPreset(model, presetSel) ?? (model ? defaultPreset(model) : undefined);
 
-  // Compare-mode sides: each has its own model + thinking preset.
-  const [leftModelId, setLeftModelId] = useState('');
-  const [leftSel, setLeftSel] = useState('');
-  const [rightModelId, setRightModelId] = useState('');
-  const [rightSel, setRightSel] = useState('');
+  // Compare-mode sides A and B: each has its own model, thinking preset and system prompt.
+  const [sideA, setSideA] = useState<SideState>({ modelId: '', sel: '', system: '' });
+  const [sideB, setSideB] = useState<SideState>({ modelId: '', sel: '', system: '' });
   const modelById = useCallback((id: string) => config.models.find((m) => m.id === id), [config.models]);
-  const leftModel = modelById(leftModelId) ?? model;
-  const rightModel = modelById(rightModelId) ?? model;
-  const leftPreset = findPreset(leftModel, leftSel) ?? (leftModel ? lowestPreset(leftModel) : undefined);
-  const rightPreset = findPreset(rightModel, rightSel) ?? (rightModel ? highestFixedPreset(rightModel) : undefined);
+  const modelA = modelById(sideA.modelId) ?? model;
+  const modelB = modelById(sideB.modelId) ?? model;
+  const presetA = findPreset(modelA, sideA.sel) ?? (modelA ? lowestPreset(modelA) : undefined);
+  const presetB = findPreset(modelB, sideB.sel) ?? (modelB ? highestFixedPreset(modelB) : undefined);
+  const instructorPresets = config.systemPresets ?? [];
 
-  const initCompare = () => {
+  // Quick setups. "thinking": same prompt, different thinking. "system": same model, different system prompt.
+  const setupCompare = (kind: 'thinking' | 'system') => {
     if (!model) return;
+    if (kind === 'system') {
+      const sel = presetKey(preset ?? { label: '' });
+      setSideA({ modelId: model.id, sel, system });
+      setSideB({ modelId: model.id, sel, system: '' });
+      return;
+    }
     const base = modelById(COMPARE_OFF_MODEL);
     const offPreset = base?.thinking.presets.find(isThinkingOff);
-    if (base && offPreset) {
-      setLeftModelId(base.id);
-      setLeftSel(presetKey(offPreset));
-    } else {
-      setLeftModelId(model.id);
-      setLeftSel(presetKey(lowestPreset(model) ?? { label: '' }));
-    }
-    setRightModelId(model.id);
-    setRightSel(presetKey(highestFixedPreset(model) ?? { label: '' }));
+    const a = base && offPreset ? { modelId: base.id, sel: presetKey(offPreset) } : { modelId: model.id, sel: presetKey(lowestPreset(model) ?? { label: '' }) };
+    setSideA({ ...a, system });
+    setSideB({ modelId: model.id, sel: presetKey(highestFixedPreset(model) ?? { label: '' }), system });
   };
 
   const onModelChange = (id: string) => {
@@ -91,12 +95,11 @@ export default function PromptLab({ config, onInactive }: Props) {
     if (dp) setPresetSel(presetKey(dp));
   };
 
-  // Token estimate
-  const used = useMemo(() => {
-    const chars =
-      system.length + prompt.length + (chat ? history.reduce((n, m) => n + m.text.length, 0) : 0);
-    return Math.ceil(chars / 4);
-  }, [system, prompt, history, chat]);
+  // Token estimate (compare mode: the larger of the two sides)
+  const showCompare = compare && !chat;
+  const histTokens = chat ? estimateTokens(history.map((m) => m.text).join('')) : 0;
+  const tokensFor = (sys: string) => estimateTokens(sys + prompt) + histTokens;
+  const used = showCompare ? Math.max(tokensFor(sideA.system), tokensFor(sideB.system)) : tokensFor(system);
   const over = used > config.maxInputTokens;
   const canSend = !running && !over && prompt.trim().length > 0 && !!model;
 
@@ -110,6 +113,7 @@ export default function PromptLab({ config, onInactive }: Props) {
       set: (fn: (r: RunState) => RunState) => void,
       runModel: PromptLabModel,
       runPreset: ThinkingPreset,
+      runSystem: string,
       messages: ChatMessage[],
       controller: AbortController
     ): Promise<{ answer: string; ok: boolean }> => {
@@ -120,7 +124,7 @@ export default function PromptLab({ config, onInactive }: Props) {
           {
             model: runModel.id,
             messages,
-            systemInstruction: system.trim() ? system : null,
+            systemInstruction: runSystem.trim() ? runSystem : null,
             thinking: presetToThinking(runModel, runPreset),
             includeThoughts: showThoughts && !isThinkingOff(runPreset),
             ...(runModel.supportsTemperature ? { temperature } : {}),
@@ -148,7 +152,7 @@ export default function PromptLab({ config, onInactive }: Props) {
         return { answer, ok: false };
       }
     },
-    [system, showThoughts, temperature, onInactive]
+    [showThoughts, temperature, onInactive]
   );
 
   const send = useCallback(async () => {
@@ -165,7 +169,7 @@ export default function PromptLab({ config, onInactive }: Props) {
       setPending(text);
       setPrompt('');
       setRight(EMPTY_RUN);
-      const res = await runOne(setLeft, model, preset, messages, c1);
+      const res = await runOne(setLeft, model, preset, system, messages, c1);
       if (res.answer) {
         setHistory([...messages, { role: 'model', text: res.answer }]);
       } else if (!res.ok) {
@@ -179,14 +183,14 @@ export default function PromptLab({ config, onInactive }: Props) {
       const c2 = new AbortController();
       controllers.current = [c1, c2];
       await Promise.all([
-        runOne(setLeft, leftModel!, leftPreset!, messages, c1),
-        runOne(setRight, rightModel!, rightPreset!, messages, c2),
+        runOne(setLeft, modelA!, presetA!, sideA.system, messages, c1),
+        runOne(setRight, modelB!, presetB!, sideB.system, messages, c2),
       ]);
     } else {
       setRight(EMPTY_RUN);
-      await runOne(setLeft, model, preset, messages, c1);
+      await runOne(setLeft, model, preset, system, messages, c1);
     }
-  }, [canSend, model, preset, prompt, chat, history, compare, leftModel, leftPreset, rightModel, rightPreset, runOne]);
+  }, [canSend, model, preset, prompt, chat, history, compare, system, modelA, presetA, sideA.system, modelB, presetB, sideB.system, runOne]);
 
   const clearHistory = () => {
     stop();
@@ -210,14 +214,17 @@ export default function PromptLab({ config, onInactive }: Props) {
     return <p className="text-gray-600 dark:text-gray-300">No models are available right now.</p>;
   }
 
-  const showCompare = compare && !chat;
   const thinkingOff = showCompare
-    ? !!leftPreset && !!rightPreset && isThinkingOff(leftPreset) && isThinkingOff(rightPreset)
+    ? !!presetA && !!presetB && isThinkingOff(presetA) && isThinkingOff(presetB)
     : !!preset && isThinkingOff(preset);
   const showTemperature = showCompare
-    ? !!leftModel?.supportsTemperature || !!rightModel?.supportsTemperature
+    ? !!modelA?.supportsTemperature || !!modelB?.supportsTemperature
     : model.supportsTemperature;
-  const sideLabel = (m?: PromptLabModel, pr?: ThinkingPreset) => `${m?.name ?? ''} · ${pr?.label ?? ''}`;
+  const sideTitle = (letter: string, m?: PromptLabModel, pr?: ThinkingPreset, sys = '') => {
+    const flat = sys.trim().replace(/\s+/g, ' ');
+    const hint = flat ? `‘${flat.length > 40 ? `${flat.slice(0, 40).trimEnd()}…` : flat}’` : 'no system prompt';
+    return `${letter} · ${m?.name ?? ''} · ${pr?.label ?? ''} · ${hint}`;
+  };
 
   return (
     <div className="space-y-6">
@@ -240,7 +247,7 @@ export default function PromptLab({ config, onInactive }: Props) {
             {!showCompare ? (
               <ThinkingControl label="Thinking" model={model} selected={presetSel} onSelect={setPresetSel} />
             ) : (
-              <p className="text-sm text-gray-600 dark:text-gray-300">Choose a model and thinking setting for each side below.</p>
+              <p className="text-sm text-gray-600 dark:text-gray-300">Choose a model, thinking setting and system prompt for each side below.</p>
             )}
             {!thinkingOff && (
               <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -252,35 +259,20 @@ export default function PromptLab({ config, onInactive }: Props) {
         </div>
 
         {showCompare && (
-          <div className="grid gap-4 md:grid-cols-2">
-            {([
-              ['Left', leftModel, leftSel, setLeftModelId, setLeftSel],
-              ['Right', rightModel, rightSel, setRightModelId, setRightSel],
-            ] as const).map(([side, m, sel, setM, setSel]) => (
-              <div key={side} className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
-                <label className="block space-y-1">
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{side} model</span>
-                  <select
-                    className={field}
-                    aria-label={`${side} model`}
-                    value={m?.id ?? ''}
-                    onChange={(e) => {
-                      setM(e.target.value);
-                      const nm = modelById(e.target.value);
-                      const np = nm ? (side === 'Left' ? lowestPreset(nm) : highestFixedPreset(nm)) : undefined;
-                      if (np) setSel(presetKey(np));
-                    }}
-                  >
-                    {config.models.map((x) => (
-                      <option key={x.id} value={x.id}>
-                        {x.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {m && <ThinkingControl label={`${side} thinking`} model={m} selected={sel} onSelect={setSel} />}
-              </div>
-            ))}
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">What do you want to compare?</span>
+              <button type="button" className={smallBtn} onClick={() => setupCompare('thinking')}>
+                Thinking
+              </button>
+              <button type="button" className={smallBtn} onClick={() => setupCompare('system')}>
+                System prompt
+              </button>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <CompareSide letter="A" models={config.models} model={modelA} state={sideA} presets={instructorPresets} onChange={setSideA} />
+              <CompareSide letter="B" models={config.models} model={modelB} state={sideB} presets={instructorPresets} onChange={setSideB} />
+            </div>
           </div>
         )}
 
@@ -320,52 +312,38 @@ export default function PromptLab({ config, onInactive }: Props) {
               disabled={chat}
               onChange={(e) => {
                 setCompare(e.target.checked);
-                if (e.target.checked) initCompare();
+                if (e.target.checked) setupCompare(system.trim() ? 'system' : 'thinking');
               }}
               className="h-4 w-4"
             />
-            Compare thinking
+            Compare A/B
           </label>
 
-          <button type="button" className={smallBtn} onClick={() => setSysOpen((o) => !o)} aria-expanded={sysOpen}>
-            {sysOpen ? 'Hide' : 'Show'} advanced
+          <button type="button" className={smallBtn} onClick={() => setAdvOpen((o) => !o)} aria-expanded={advOpen}>
+            {advOpen ? 'Hide' : 'Show'} advanced
           </button>
         </div>
 
-        {sysOpen && (
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="block space-y-1">
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">System instruction</span>
-              <textarea
-                className={field}
-                rows={3}
-                value={system}
-                onChange={(e) => setSystem(e.target.value)}
-                placeholder="You are a helpful tutor who answers in one sentence."
+        {advOpen && showTemperature && (
+          <div className="space-y-2">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              Temperature: {temperature === null ? 'model default' : temperature.toFixed(1)}
+            </span>
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={0}
+                max={2}
+                step={0.1}
+                value={temperature ?? 1}
+                onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                className="flex-1"
+                aria-label="Temperature"
               />
-            </label>
-            {showTemperature && (
-            <div className="space-y-2">
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Temperature: {temperature === null ? 'model default' : temperature.toFixed(1)}
-              </span>
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  value={temperature ?? 1}
-                  onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                  className="flex-1"
-                  aria-label="Temperature"
-                />
-                <button type="button" className={smallBtn} onClick={() => setTemperature(null)}>
-                  Default
-                </button>
-              </div>
+              <button type="button" className={smallBtn} onClick={() => setTemperature(null)}>
+                Default
+              </button>
             </div>
-            )}
           </div>
         )}
       </section>
@@ -387,6 +365,8 @@ export default function PromptLab({ config, onInactive }: Props) {
 
       {/* Prompt */}
       <section className="space-y-3">
+        {!showCompare && <SystemPromptField value={system} presets={instructorPresets} onChange={setSystem} />}
+
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300 mr-1">Techniques:</span>
           <button type="button" className={smallBtn} onClick={() => setPrompt((p) => (p.trim() ? `${p}\n\n${FEW_SHOT_SCAFFOLD}` : FEW_SHOT_SCAFFOLD))}>
@@ -395,16 +375,15 @@ export default function PromptLab({ config, onInactive }: Props) {
           <button type="button" className={smallBtn} onClick={() => appendPrompt(COT_SUFFIX)}>
             Chain-of-thought
           </button>
-          <button
-            type="button"
-            className={smallBtn}
-            onClick={() => {
-              setSystem((s) => (s.trim() ? s : ROLE_SCAFFOLD));
-              setSysOpen(true);
-            }}
-          >
-            Role
-          </button>
+          {!showCompare && (
+            <button
+              type="button"
+              className={smallBtn}
+              onClick={() => setSystem((s) => (s.trim() ? s : ROLE_SCAFFOLD))}
+            >
+              Role
+            </button>
+          )}
           <select
             aria-label="Examples"
             className="rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200"
@@ -413,10 +392,7 @@ export default function PromptLab({ config, onInactive }: Props) {
               const ex = EXAMPLES.find((x) => x.id === e.target.value);
               if (ex) {
                 setPrompt(ex.prompt);
-                if (ex.system) {
-                  setSystem(ex.system);
-                  setSysOpen(true);
-                }
+                if (ex.system) setSystem(ex.system);
               }
             }}
           >
@@ -468,10 +444,10 @@ export default function PromptLab({ config, onInactive }: Props) {
       {!chat && showCompare && (left.status !== 'idle' || right.status !== 'idle') && (
         <section className="grid gap-4 lg:grid-cols-2">
           <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-            <OutputPane key={`l${runId}`} run={left} title={sideLabel(leftModel, leftPreset)} />
+            <OutputPane key={`l${runId}`} run={left} title={sideTitle('A', modelA, presetA, sideA.system)} />
           </div>
           <div className="rounded-xl border border-blue-300 dark:border-blue-700 p-4">
-            <OutputPane key={`r${runId}`} run={right} title={sideLabel(rightModel, rightPreset)} />
+            <OutputPane key={`r${runId}`} run={right} title={sideTitle('B', modelB, presetB, sideB.system)} />
           </div>
         </section>
       )}
@@ -490,45 +466,6 @@ function Bubble({ role, text }: { role: 'user' | 'model'; text: string }) {
   ) : (
     <div className="mr-8 rounded-2xl rounded-bl-sm bg-gray-100 dark:bg-gray-800 p-4 text-lg text-gray-900 dark:text-gray-100">
       <SimpleMarkdown text={text} />
-    </div>
-  );
-}
-
-function ThinkingControl({
-  label,
-  model,
-  selected,
-  onSelect,
-}: {
-  label: string;
-  model: PromptLabModel;
-  selected: string;
-  onSelect: (key: string) => void;
-}) {
-  const active = findPreset(model, selected) ?? defaultPreset(model);
-  return (
-    <div className="space-y-1">
-      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
-      <div role="radiogroup" aria-label={label} className="flex flex-wrap gap-1 rounded-xl bg-gray-100 dark:bg-gray-800 p-1">
-        {model.thinking.presets.map((p) => {
-          const on = !!active && presetKey(p) === presetKey(active);
-          return (
-            <button
-              key={presetKey(p)}
-              type="button"
-              role="radio"
-              aria-checked={on}
-              onClick={() => onSelect(presetKey(p))}
-              className={`flex-1 rounded-lg px-3 py-2 text-base font-semibold transition-colors ${
-                on ? 'bg-blue-600 text-white shadow' : 'text-gray-700 dark:text-gray-200 hover:bg-white dark:hover:bg-gray-700'
-              }`}
-            >
-              {p.label}
-            </button>
-          );
-        })}
-      </div>
-      {model.thinking.note && <p className="text-sm text-gray-500 dark:text-gray-400">{model.thinking.note}</p>}
     </div>
   );
 }

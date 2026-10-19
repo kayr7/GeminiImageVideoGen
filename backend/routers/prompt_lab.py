@@ -14,7 +14,7 @@ from typing import Any, AsyncIterator, List, Literal, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from google.genai import types
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from models import SuccessResponse
 from utils import prompt_lab as lab
@@ -249,6 +249,19 @@ async def _stream(client, model, contents, config, budget, level, lease) -> Asyn
 
 # ------------------------------------------------------------------------------ admin
 
+class PresetModel(BaseModel):
+    label: str
+    text: str = Field(default="", max_length=lab.MAX_PRESET_TEXT)
+
+    @field_validator("label")
+    @classmethod
+    def _label(cls, v: str) -> str:
+        v = v.strip()
+        if not 1 <= len(v) <= lab.MAX_PRESET_LABEL:
+            raise ValueError(f"label must be 1-{lab.MAX_PRESET_LABEL} characters")
+        return v
+
+
 class AdminUpdate(BaseModel):
     enabled: Optional[bool] = None
     durationMinutes: Optional[int] = Field(default=None, ge=1, le=60 * 24 * 14)
@@ -256,6 +269,7 @@ class AdminUpdate(BaseModel):
     defaultModel: Optional[str] = None
     maxOutputTokens: Optional[int] = Field(default=None, ge=256, le=8192)
     allowHistory: Optional[bool] = None
+    systemPresets: Optional[List[PresetModel]] = Field(default=None, max_length=lab.MAX_PRESETS)
 
 
 async def _admin_payload() -> dict:
@@ -290,6 +304,8 @@ async def admin_put(update: AdminUpdate, _: None = Depends(require_admin)) -> Su
         s["maxOutputTokens"] = update.maxOutputTokens
     if update.allowHistory is not None:
         s["allowHistory"] = update.allowHistory
+    if update.systemPresets is not None:
+        s["systemPresets"] = [p.model_dump() for p in update.systemPresets]
     if update.enabled is False:
         s["enabled"], s["expiresAt"] = False, None
     elif update.enabled is True or (s["enabled"] and "durationMinutes" in given):

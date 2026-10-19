@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/lib/utils/apiClient';
-import type { PromptLabModel } from '@/components/prompt-lab/types';
+import type { PromptLabModel, SystemPresetItem } from '@/components/prompt-lab/types';
 
 interface Settings {
   enabled: boolean;
@@ -11,6 +11,7 @@ interface Settings {
   defaultModel: string | null;
   maxOutputTokens: number;
   allowHistory: boolean;
+  systemPresets?: SystemPresetItem[];
 }
 
 interface Stats {
@@ -57,6 +58,9 @@ export default function PromptLabPanel() {
   const [defaultModel, setDefaultModel] = useState<string>('');
   const [maxOutput, setMaxOutput] = useState<number>(2048);
   const [allowHistory, setAllowHistory] = useState(true);
+  const [presets, setPresets] = useState<SystemPresetItem[]>([]);
+  const [newLabel, setNewLabel] = useState('');
+  const [newText, setNewText] = useState('');
   const dirty = useRef(false);
 
   const apply = useCallback((d: PanelData, force = false) => {
@@ -66,6 +70,7 @@ export default function PromptLabPanel() {
       setDefaultModel(d.settings.defaultModel ?? '');
       setMaxOutput(d.settings.maxOutputTokens);
       setAllowHistory(d.settings.allowHistory);
+      setPresets(d.settings.systemPresets ?? []);
       dirty.current = false;
     }
   }, []);
@@ -90,7 +95,7 @@ export default function PromptLabPanel() {
     return () => clearInterval(id);
   }, [load]);
 
-  const save = async (patch: Record<string, unknown>) => {
+  const save = async (patch: Record<string, unknown>): Promise<boolean> => {
     setSaving(true);
     try {
       const res = await apiFetch('/api/admin/prompt-lab', {
@@ -105,8 +110,10 @@ export default function PromptLabPanel() {
       const body = await res.json();
       apply(body.data, true);
       setError(null);
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
+      return false;
     } finally {
       setSaving(false);
     }
@@ -295,6 +302,71 @@ export default function PromptLabPanel() {
             >
               Save settings
             </button>
+          </div>
+        </div>
+      </details>
+
+      <details className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+        <summary className="cursor-pointer text-sm font-medium text-gray-800 dark:text-gray-100">System prompt presets</summary>
+        <div className="mt-3 space-y-3">
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            Students see these first in the Presets menu next to the system prompt. Adding or removing a preset saves immediately.
+          </p>
+          {presets.length === 0 && <p className="text-sm text-gray-500 dark:text-gray-400">No presets yet.</p>}
+          <ul className="space-y-2">
+            {presets.map((p, i) => (
+              <li key={i} className="flex items-start justify-between gap-3 rounded-lg bg-gray-100 dark:bg-gray-800 px-3 py-2">
+                <div className="min-w-0 text-sm">
+                  <div className="font-medium text-gray-900 dark:text-white">{p.label}</div>
+                  <div className="text-gray-600 dark:text-gray-300 break-words">
+                    {p.text.length > 120 ? `${p.text.slice(0, 120)}…` : p.text}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label={`Remove ${p.label}`}
+                  disabled={saving}
+                  onClick={() => void save({ systemPresets: presets.filter((_, j) => j !== i) })}
+                  className="shrink-0 rounded-lg border border-gray-300 dark:border-gray-600 px-3 py-1 text-sm text-red-600 dark:text-red-400 hover:bg-white dark:hover:bg-gray-700"
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="space-y-2">
+            <input
+              aria-label="Preset label"
+              className={`${input} w-full sm:w-64`}
+              maxLength={60}
+              placeholder="Label"
+              value={newLabel}
+              onChange={(e) => setNewLabel(e.target.value)}
+            />
+            <textarea
+              aria-label="Preset text"
+              className={`${input} w-full`}
+              rows={3}
+              maxLength={8000}
+              placeholder="System prompt text"
+              value={newText}
+              onChange={(e) => setNewText(e.target.value)}
+            />
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                disabled={saving || !newLabel.trim() || presets.length >= 20}
+                onClick={async () => {
+                  if (await save({ systemPresets: [...presets, { label: newLabel.trim(), text: newText }] })) {
+                    setNewLabel('');
+                    setNewText('');
+                  }
+                }}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                Add preset
+              </button>
+            </div>
           </div>
         </div>
       </details>

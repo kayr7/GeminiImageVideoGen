@@ -60,6 +60,7 @@ A public (no login) prompting playground for lectures, active only while an admi
 - **Settings** live in the `promptLab` section of the admin config JSON (`admin_config.get_admin_section/store_admin_section`), cached in memory with an mtime check. Expired means disabled.
 - **Streaming**: `/generate` is an `async def` endpoint using the async SDK (`client.aio.models.generate_content_stream`) and answers with SSE (`thought`, `answer`, `usage`, `error`, `done` events, `: ping` heartbeats). Nothing blocks the event loop or uses the sync threadpool per request (only one small SQLite stats write at the end).
 - **Limits** (in memory, single process): input <= `PROMPT_LAB_MAX_INPUT_TOKENS` (local estimate, `count_tokens` only when near the limit), sliding-window rate limits per client id / IP, and a global semaphore (`PROMPT_LAB_MAX_CONCURRENCY`) with 503 after 10 s of waiting.
+- **System prompts**: students edit a system prompt (built-in presets plus optional instructor presets stored as `systemPresets` in the settings and served via `/config`), and A/B compare mode lets each side use its own model, thinking level and system prompt. The system instruction counts toward the input token limit.
 - **Stats**: daily aggregates in `prompt_lab_usage` (no prompt text, no IPs).
 
 ## Security notes

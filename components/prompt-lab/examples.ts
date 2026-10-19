@@ -37,3 +37,43 @@ export const FEW_SHOT_SCAFFOLD =
 export const COT_SUFFIX = "Let's think step by step.";
 
 export const ROLE_SCAFFOLD = 'You are an expert ';
+
+export interface SystemPreset {
+  id: string;
+  label: string;
+  text: string;
+}
+
+/** Built-in system prompt presets ("none" clears the field). */
+export const SYSTEM_PRESETS: SystemPreset[] = [
+  { id: 'none', label: 'None', text: '' },
+  { id: 'helpful', label: 'Helpful assistant', text: 'You are a helpful, friendly assistant. Answer clearly and accurately.' },
+  { id: 'one-sentence', label: 'One sentence only', text: 'Answer every question in exactly one sentence. No lists, no extra explanation.' },
+  {
+    id: 'socratic',
+    label: 'Socratic tutor',
+    text: 'You are a Socratic tutor. Never give the answer directly. Instead, ask one or two short guiding questions that help the student work it out themselves.',
+  },
+  { id: 'eli10', label: "Explain like I'm 10", text: "Explain everything like the reader is 10 years old: simple words, short sentences, a friendly everyday example." },
+  {
+    id: 'stepwise',
+    label: 'Step-by-step reasoner',
+    text: 'Always reason step by step before giving your final answer. Write out each step, then end with a final line in the form "Answer: <answer>".',
+  },
+  {
+    id: 'json',
+    label: 'JSON only',
+    text: 'Respond only with valid JSON of the form {"answer": string, "confidence": number between 0 and 1}. No prose, no markdown, no code fences.',
+  },
+  {
+    id: 'cooking',
+    label: 'Guardrail: cooking only',
+    text: 'You are a cooking assistant. Only answer questions about cooking, recipes and food preparation. Politely refuse anything else and offer to help with a cooking question instead.',
+  },
+  { id: 'pirate', label: 'Pirate persona', text: 'You are a pirate. Speak like a pirate in every reply, but still give correct and useful answers.' },
+  {
+    id: 'skeptic',
+    label: 'Skeptical reviewer',
+    text: 'You are a skeptical reviewer. Point out flaws, hidden assumptions and missing evidence in whatever the user says or asks, then suggest how to fix them.',
+  },
+];

@@ -33,6 +33,13 @@ export interface PromptLabConfig {
   allowHistory: boolean;
   defaultModel: string | null;
   models: PromptLabModel[];
+  /** Instructor-defined system prompt presets (missing = none). */
+  systemPresets?: SystemPresetItem[];
+}
+
+export interface SystemPresetItem {
+  label: string;
+  text: string;
 }
 
 export interface ChatMessage {

@@ -108,7 +108,12 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "defaultModel": "gemini-3.8-flash",
     "maxOutputTokens": 2048,
     "allowHistory": True,
+    "systemPresets": [],
 }
+
+MAX_PRESETS = 20
+MAX_PRESET_LABEL = 60
+MAX_PRESET_TEXT = 8000
 
 
 def get_model(model_id: str) -> Optional[Dict[str, Any]]:
@@ -163,6 +168,26 @@ def _parse_expiry(value: Any) -> Optional[datetime]:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def _clean_presets(raw: Any) -> List[Dict[str, str]]:
+    """Keep only well-formed instructor system-prompt presets (label + text)."""
+    out: List[Dict[str, str]] = []
+    if not isinstance(raw, list):
+        return out
+    for p in raw:
+        if not isinstance(p, dict):
+            continue
+        label, text = p.get("label"), p.get("text")
+        if not isinstance(label, str) or not isinstance(text, str):
+            continue
+        label = label.strip()
+        if not label or len(label) > MAX_PRESET_LABEL or len(text) > MAX_PRESET_TEXT:
+            continue
+        out.append({"label": label, "text": text})
+        if len(out) >= MAX_PRESETS:
+            break
+    return out
+
+
 def _normalise(raw: Dict[str, Any]) -> Dict[str, Any]:
     s = dict(DEFAULT_SETTINGS)
     s["allowedModels"] = list(DEFAULT_SETTINGS["allowedModels"])
@@ -180,6 +205,7 @@ def _normalise(raw: Dict[str, Any]) -> Dict[str, Any]:
         s["maxOutputTokens"] = min(max(mo, MAX_OUTPUT_TOKENS_RANGE[0]), MAX_OUTPUT_TOKENS_RANGE[1])
     if isinstance(raw.get("allowHistory"), bool):
         s["allowHistory"] = raw["allowHistory"]
+    s["systemPresets"] = _clean_presets(raw.get("systemPresets"))
     dm = raw.get("defaultModel")
     if dm in s["allowedModels"]:
         s["defaultModel"] = dm
@@ -220,7 +246,7 @@ def public_config() -> Dict[str, Any]:
     base = {
         "enabled": False, "expiresAt": None, "maxInputTokens": max_input_tokens(),
         "maxOutputTokens": s["maxOutputTokens"], "allowHistory": s["allowHistory"],
-        "defaultModel": None, "models": [],
+        "defaultModel": None, "models": [], "systemPresets": [],
     }
     if not is_active(s):
         base["maxOutputTokens"] = DEFAULT_SETTINGS["maxOutputTokens"]
@@ -229,6 +255,7 @@ def public_config() -> Dict[str, Any]:
     base.update(
         enabled=True, expiresAt=s["expiresAt"], defaultModel=s["defaultModel"],
         models=[_REGISTRY_BY_ID[m] for m in s["allowedModels"]],
+        systemPresets=s["systemPresets"],
     )
     return base
 

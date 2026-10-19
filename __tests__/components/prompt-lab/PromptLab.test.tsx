@@ -155,7 +155,7 @@ describe('Prompt Lab controls', () => {
   it('compare defaults to 2.5 Flash Off vs the selected model at high', async () => {
     mockFetch(makeConfig());
     render(<PromptLab config={makeConfig()} onInactive={() => {}} />);
-    fireEvent.click(screen.getByLabelText('Compare thinking'));
+    fireEvent.click(screen.getByLabelText('Compare A/B'));
     fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'hello' } });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
@@ -166,8 +166,8 @@ describe('Prompt Lab controls', () => {
     const right = bodies.find((b) => b.model === 'gemini-3.8-flash');
     expect(left.thinking).toEqual({ budget: 0 });
     expect(right.thinking).toEqual({ level: 'high' });
-    expect(await screen.findByText('Gemini 2.5 Flash · Off')).toBeInTheDocument();
-    expect(screen.getByText('Gemini 3.8 Flash · High')).toBeInTheDocument();
+    expect(await screen.findByText(/^A · Gemini 2\.5 Flash · Off · no system prompt$/)).toBeInTheDocument();
+    expect(screen.getByText(/^B · Gemini 3\.8 Flash · High · no system prompt$/)).toBeInTheDocument();
     expect((await screen.findAllByText('hi')).length).toBe(2);
   });
 
@@ -175,12 +175,85 @@ describe('Prompt Lab controls', () => {
     const cfg = makeConfig({ models: [levelModel] });
     mockFetch(cfg);
     render(<PromptLab config={cfg} onInactive={() => {}} />);
-    fireEvent.click(screen.getByLabelText('Compare thinking'));
+    fireEvent.click(screen.getByLabelText('Compare A/B'));
     fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'hello' } });
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
     });
     await waitFor(() => expect(generateBodies()).toHaveLength(2));
     expect(generateBodies().map((b) => b.thinking.level).sort()).toEqual(['high', 'low']);
+  });
+
+  it('system prompt is visible without advanced and presets fill it', () => {
+    render(<PromptLab config={makeConfig()} onInactive={() => {}} />);
+    const box = screen.getByLabelText('System prompt') as HTMLTextAreaElement;
+    expect(box).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Presets'), { target: { value: 'b:pirate' } });
+    expect(box.value).toMatch(/pirate/i);
+    fireEvent.change(screen.getByLabelText('Presets'), { target: { value: 'b:none' } });
+    expect(box.value).toBe('');
+    fireEvent.change(box, { target: { value: 'my own' } });
+    expect(box.value).toBe('my own');
+  });
+
+  it('Role button fills the system prompt without opening advanced', () => {
+    render(<PromptLab config={makeConfig()} onInactive={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Role' }));
+    expect((screen.getByLabelText('System prompt') as HTMLTextAreaElement).value).toMatch(/expert/);
+    expect(screen.queryByLabelText('Temperature')).toBeNull();
+  });
+
+  it('shows instructor presets in their own optgroup', () => {
+    const cfg = makeConfig({ systemPresets: [{ label: 'Week 3 tutor', text: 'Tutor text' }] });
+    render(<PromptLab config={cfg} onInactive={() => {}} />);
+    const group = screen.getByRole('group', { name: 'From your instructor' });
+    expect(group).toHaveTextContent('Week 3 tutor');
+    expect(screen.getByRole('group', { name: 'Built-in' })).toHaveTextContent('Pirate persona');
+    fireEvent.change(screen.getByLabelText('Presets'), { target: { value: 'i:0' } });
+    expect((screen.getByLabelText('System prompt') as HTMLTextAreaElement).value).toBe('Tutor text');
+  });
+
+  it('A/B compare sends a different systemInstruction per side', async () => {
+    mockFetch(makeConfig());
+    render(<PromptLab config={makeConfig()} onInactive={() => {}} />);
+    fireEvent.change(screen.getByLabelText('System prompt'), { target: { value: 'Be brief.' } });
+    fireEvent.click(screen.getByLabelText('Compare A/B'));
+    // Non-empty shared system prompt defaults to the System prompt setup.
+    expect(screen.queryByLabelText('System prompt')).toBeNull();
+    expect((screen.getByLabelText('A system prompt') as HTMLTextAreaElement).value).toBe('Be brief.');
+    expect((screen.getByLabelText('B system prompt') as HTMLTextAreaElement).value).toBe('');
+    fireEvent.change(screen.getByLabelText('B presets'), { target: { value: 'b:pirate' } });
+    fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'hello' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Compare' }));
+    });
+    await waitFor(() => expect(generateBodies()).toHaveLength(2));
+    const sys = generateBodies().map((b) => b.systemInstruction);
+    expect(sys).toContain('Be brief.');
+    expect(sys.filter((x) => /pirate/i.test(x ?? ''))).toHaveLength(1);
+    expect(await screen.findByText(/^A · Gemini 3\.8 Flash · Medium · ‘Be brief\.’$/)).toBeInTheDocument();
+  });
+
+  it('System prompt quick setup leaves B empty; Thinking setup copies it to both', async () => {
+    mockFetch(makeConfig());
+    render(<PromptLab config={makeConfig()} onInactive={() => {}} />);
+    fireEvent.change(screen.getByLabelText('System prompt'), { target: { value: 'Be brief.' } });
+    fireEvent.click(screen.getByLabelText('Compare A/B'));
+    fireEvent.click(screen.getByRole('button', { name: 'Thinking' }));
+    expect((screen.getByLabelText('B system prompt') as HTMLTextAreaElement).value).toBe('Be brief.');
+    fireEvent.click(screen.getByRole('button', { name: 'System prompt' }));
+    expect((screen.getByLabelText('A system prompt') as HTMLTextAreaElement).value).toBe('Be brief.');
+    expect((screen.getByLabelText('B system prompt') as HTMLTextAreaElement).value).toBe('');
+    // Leaving compare keeps the shared prompt.
+    fireEvent.click(screen.getByLabelText('Compare A/B'));
+    expect((screen.getByLabelText('System prompt') as HTMLTextAreaElement).value).toBe('Be brief.');
+  });
+
+  it('compare token limit uses the larger side', () => {
+    render(<PromptLab config={makeConfig()} onInactive={() => {}} />);
+    fireEvent.click(screen.getByLabelText('Compare A/B'));
+    fireEvent.change(screen.getByLabelText('B system prompt'), { target: { value: 'x'.repeat(401) } });
+    fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'hi' } });
+    expect(screen.getByRole('button', { name: 'Compare' })).toBeDisabled();
   });
 });

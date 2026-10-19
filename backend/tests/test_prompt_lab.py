@@ -145,7 +145,8 @@ def test_admin_auth(client, user_a):
 
 
 def test_admin_validation(client, admin_headers):
-    put = lambda b: client.put("/api/admin/prompt-lab", json=b, headers=admin_headers)
+    def put(b):
+        return client.put("/api/admin/prompt-lab", json=b, headers=admin_headers)
     assert put({"allowedModels": ["nope"]}).status_code == 400
     assert put({"allowedModels": ["gemini-2.5-pro"]}).status_code == 400  # removed model
     assert put({"allowedModels": ["gemini-4-argon"], "defaultModel": "gemini-2.5-flash"}).status_code == 400
@@ -194,7 +195,8 @@ def test_budget_validation(client, fake):
 
 def test_level_validation_and_kind_mismatch(client, fake):
     enable(allowedModels=["gemini-3.8-flash", "gemini-3.6-flash", "gemini-2.5-flash"])
-    lvl = lambda m, t: gen(client, body(model=m, thinking=t)).status_code
+    def lvl(m, t):
+        return gen(client, body(model=m, thinking=t)).status_code
     assert lvl("gemini-3.8-flash", {"level": "minimal"}) == 400
     assert lvl("gemini-3.8-flash", {"level": "bogus"}) == 400
     assert lvl("gemini-3.8-flash", {"budget": 1024}) == 400
@@ -402,3 +404,55 @@ def test_slot_released_when_client_disconnects_before_streaming(monkeypatch, fak
     # With a cap of 1, a leaked slot would make this next request wait and 503.
     with TestClient(main.app) as c:
         assert gen(c).status_code == 200
+
+
+# ------------------------------------------------------------------ system presets
+
+def test_system_presets_normalised():
+    ok = {"label": "  Tutor ", "text": "Be a tutor"}
+    enable(systemPresets=[
+        ok, "junk", {"label": "", "text": "x"}, {"label": "   ", "text": "x"},
+        {"label": "x" * 61, "text": "x"}, {"label": "L", "text": 5}, {"text": "no label"},
+        {"label": "Long", "text": "t" * 8001}, {"label": "Empty text", "text": ""},
+    ])
+    assert lab.get_settings()["systemPresets"] == [
+        {"label": "Tutor", "text": "Be a tutor"}, {"label": "Empty text", "text": ""}]
+    enable(systemPresets=[{"label": f"p{i}", "text": "t"} for i in range(30)])
+    assert len(lab.get_settings()["systemPresets"]) == 20
+    enable(systemPresets="nope")
+    assert lab.get_settings()["systemPresets"] == []
+
+
+def test_admin_put_system_presets(client, admin_headers):
+    def put(b):
+        return client.put("/api/admin/prompt-lab", json=b, headers=admin_headers)
+    assert put({"systemPresets": [{"label": "x" * 61, "text": "t"}]}).status_code == 422
+    assert put({"systemPresets": [{"label": "   ", "text": "t"}]}).status_code == 422
+    assert put({"systemPresets": [{"label": "L", "text": "t" * 8001}]}).status_code == 422
+    assert put({"systemPresets": [{"label": f"p{i}", "text": "t"} for i in range(21)]}).status_code == 422
+    r = put({"systemPresets": [{"label": " Pirate ", "text": "Arr"}]})
+    assert r.status_code == 200
+    assert r.json()["data"]["settings"]["systemPresets"] == [{"label": "Pirate", "text": "Arr"}]
+    # Omitting the field keeps the stored list; an empty list clears it.
+    put({"allowHistory": False})
+    assert lab.get_settings()["systemPresets"] == [{"label": "Pirate", "text": "Arr"}]
+    put({"systemPresets": []})
+    assert lab.get_settings()["systemPresets"] == []
+
+
+def test_public_config_exposes_presets_only_when_active(client):
+    presets = [{"label": "Pirate", "text": "Arr"}]
+    s = lab.get_settings()
+    s["systemPresets"] = presets
+    lab.save_settings(s)
+    assert client.get("/api/prompt-lab/config").json()["data"]["systemPresets"] == []
+    enable()
+    assert client.get("/api/prompt-lab/config").json()["data"]["systemPresets"] == presets
+
+
+def test_system_instruction_counts_toward_limit(client, fake):
+    enable()
+    fake.count_result = 20000
+    r = gen(client, body(systemInstruction="s" * 40_000))  # ~10k tokens from system alone
+    assert r.status_code == 413
+    assert len(fake.count_calls) == 1
