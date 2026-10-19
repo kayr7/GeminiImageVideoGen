@@ -7,6 +7,7 @@ import Button from '@/components/ui/Button';
 import BatchActionBar from '@/components/admin/BatchActionBar';
 import BatchQuotaModal from '@/components/admin/BatchQuotaModal';
 import BatchTagsModal, { type TagMode } from '@/components/admin/BatchTagsModal';
+import DeleteUsersModal, { type DeleteSummary, type DeleteTarget } from '@/components/admin/DeleteUsersModal';
 import BulkCreateModal from '@/components/admin/BulkCreateModal';
 import UserFilters, { type StatusFilter } from '@/components/admin/UserFilters';
 import PromptLabPanel from '@/components/admin/PromptLabPanel';
@@ -25,7 +26,7 @@ import {
 } from '@/components/admin/shared';
 
 export default function AdminPage() {
-  const { initialising, isAdmin, ready } = useRequireAuth('/admin', { admin: true });
+  const { initialising, isAdmin, ready, user: currentUser } = useRequireAuth('/admin', { admin: true });
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<UserWithQuotas[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +44,7 @@ export default function AdminPage() {
   const [showBulkCreate, setShowBulkCreate] = useState(false);
   const [showBatchQuotas, setShowBatchQuotas] = useState(false);
   const [showBatchTags, setShowBatchTags] = useState(false);
+  const [deleteTargets, setDeleteTargets] = useState<{ users: DeleteTarget[]; bulk: boolean } | null>(null);
   const [batchActionLoading, setBatchActionLoading] = useState(false);
 
   // Inline editing state
@@ -101,9 +103,9 @@ export default function AdminPage() {
     }
   };
 
-  const loadUsers = async () => {
+  const loadUsers = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setError(null);
 
       const response = await apiFetch('/api/admin/users');
@@ -526,6 +528,33 @@ export default function AdminPage() {
     }
   };
 
+  const openDelete = (targets: UserWithQuotas[], bulk: boolean) =>
+    setDeleteTargets({
+      bulk,
+      users: targets.map((u) => ({ id: u.id, email: u.email, mediaCount: u.mediaCount ?? 0 })),
+    });
+
+  const handleBatchDelete = () => {
+    // Admins and yourself are rejected by the backend; leave them out of the dialog.
+    const targets = users.filter(
+      (u) => visibleSelectedIds.has(u.id) && !u.isAdmin && u.email !== currentUser?.username,
+    );
+    if (targets.length === 0) {
+      setError('Admin accounts and your own account cannot be deleted.');
+      return;
+    }
+    openDelete(targets, true);
+  };
+
+  const handleDeleted = async (summary: DeleteSummary) => {
+    clearSelection();
+    await loadUsers(true); // silent: keep the modal (with its summary) mounted
+    await loadAllTags();
+    if (summary.failed.length === 0) {
+      flash(`Deleted ${summary.deleted.length} user(s) and ${summary.deletedMedia} media item(s)`);
+    }
+  };
+
   const handleBulkCreated = async (count: number) => {
     // Reload is necessary here since new users are created server-side
     await loadUsers();
@@ -594,6 +623,7 @@ export default function AdminPage() {
           onSetQuotas={() => setShowBatchQuotas(true)}
           onSetTags={() => setShowBatchTags(true)}
           onResetPasswords={handleBatchResetPasswords}
+          onDelete={handleBatchDelete}
           onClear={clearSelection}
         />
       )}
@@ -604,6 +634,15 @@ export default function AdminPage() {
           onCreated={handleBulkCreated}
           onCancel={() => setShowBulkCreate(false)}
           onError={setError}
+        />
+      )}
+
+      {deleteTargets && (
+        <DeleteUsersModal
+          users={deleteTargets.users}
+          bulk={deleteTargets.bulk}
+          onDeleted={handleDeleted}
+          onClose={() => setDeleteTargets(null)}
         />
       )}
 
@@ -637,6 +676,8 @@ export default function AdminPage() {
         onToggleSelectAll={toggleSelectAll}
         onToggleActive={handleToggleActive}
         onResetPassword={handleResetPassword}
+        onDelete={(u) => openDelete([u], false)}
+        currentEmail={currentUser?.username}
         onQuotaChange={updateQuotaValue}
         onQuotaSave={handleSaveQuota}
         onQuotaCancel={cancelQuotaEdit}

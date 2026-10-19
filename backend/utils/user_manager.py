@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from datetime import datetime
@@ -10,6 +11,8 @@ from typing import Optional, List, Dict, Any, Tuple
 import bcrypt
 
 from .database import get_connection
+
+logger = logging.getLogger(__name__)
 
 
 class User:
@@ -293,6 +296,66 @@ class UserManager:
             return row is not None
 
     @staticmethod
+    def count_media_by_user() -> Dict[str, int]:
+        """Number of stored media rows per user id (single GROUP BY query)."""
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT user_id, COUNT(*) AS n FROM media GROUP BY user_id"
+            ).fetchall()
+            return {row["user_id"]: row["n"] for row in rows}
+
+    @staticmethod
+    def delete_user(user_id: str, delete_media: bool = True) -> Optional[Dict[str, Any]]:
+        """
+        Delete a user in a single transaction. Returns None if the user is unknown,
+        else {"userId", "email", "deletedMedia", "keptMedia"}.
+
+        Rows in tables with ON DELETE CASCADE foreign keys (admin links, quotas, sessions,
+        tags, templates, system prompts, text generations, chat sessions/messages) go with
+        the user. ``media`` and ``video_jobs`` have no foreign key to users:
+        - delete_media=True: the user's media and video_jobs rows are deleted in the same
+          transaction and their files (media, thumbnail, input images/previews) are removed
+          after commit; file failures are logged, not fatal.
+        - delete_media=False: media rows/files stay (they are then visible to all admins
+          with the placeholder email "deleted user").
+        """
+        from .media_storage import get_media_storage
+
+        with get_connection() as conn:
+            user = conn.execute(
+                "SELECT email FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            if not user:
+                return None
+            media_rows = conn.execute(
+                "SELECT id, type, filename FROM media WHERE user_id = ?", (user_id,)
+            ).fetchall()
+            try:
+                if delete_media:
+                    conn.execute("DELETE FROM media WHERE user_id = ?", (user_id,))
+                    conn.execute("DELETE FROM video_jobs WHERE user_id = ?", (user_id,))
+                conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+
+        if delete_media:
+            storage = get_media_storage()
+            for row in media_rows:
+                try:
+                    storage.remove_media_files(row["id"], row["type"], row["filename"])
+                except Exception:
+                    logger.exception("Failed to remove files of media %s", row["id"])
+
+        return {
+            "userId": user_id,
+            "email": user["email"],
+            "deletedMedia": len(media_rows) if delete_media else 0,
+            "keptMedia": 0 if delete_media else len(media_rows),
+        }
+
+    @staticmethod
     def get_user_admins(user_id: str) -> List[str]:
         """Get list of admin IDs who can manage this user."""
         with get_connection() as conn:
@@ -415,6 +478,15 @@ class UserManager:
             return [row["tag"] for row in rows]
 
 
+def get_env_admin_username() -> Optional[str]:
+    """Username of the env-configured admin (APP_/ADMIN_/LOGIN_USERNAME), if any."""
+    for key in ("APP_USERNAME", "ADMIN_USERNAME", "LOGIN_USERNAME"):
+        value = os.getenv(key)
+        if value:
+            return value
+    return None
+
+
 def ensure_env_admin_exists() -> Optional[User]:
     """
     Ensure the admin user from environment variables exists in the database.
@@ -484,4 +556,4 @@ def ensure_env_admin_exists() -> Optional[User]:
     return admin_user
 
 
-__all__ = ["User", "UserManager", "ensure_env_admin_exists"]
+__all__ = ["User", "UserManager", "ensure_env_admin_exists", "get_env_admin_username"]

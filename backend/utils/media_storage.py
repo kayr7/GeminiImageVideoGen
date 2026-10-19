@@ -235,7 +235,11 @@ class MediaStorage:
         extract only mode, negativePrompt and the number of input images.
         """
         if admin_id is not None:
-            where = "(user_id = ? OR user_id IN (SELECT user_id FROM user_admins WHERE admin_id = ?))"
+            # Media of deleted users (kept on purpose) stays visible to every admin.
+            where = (
+                "(user_id = ? OR user_id IN (SELECT user_id FROM user_admins WHERE admin_id = ?)"
+                " OR user_id NOT IN (SELECT id FROM users))"
+            )
             params: List[Any] = [admin_id, admin_id]
         else:
             where = "user_id = ?"
@@ -314,7 +318,7 @@ class MediaStorage:
             return conn.execute(query, params).fetchone()[0]
 
     def delete_media(self, media_id: str) -> bool:
-        """Delete media file and metadata by ID"""
+        """Delete media file, thumbnail, input files and metadata by ID"""
         with get_connection() as conn:
             row = conn.execute(
                 "SELECT * FROM media WHERE id = ?",
@@ -324,9 +328,7 @@ class MediaStorage:
         if not row:
             return False
 
-        media_meta = self._row_to_metadata(row)
-
-        file_path = self.file_path_for(media_meta["type"], media_meta["filename"])
+        file_path = self.file_path_for(row["type"], row["filename"])
 
         try:
             if file_path.exists():
@@ -339,8 +341,21 @@ class MediaStorage:
             conn.execute("DELETE FROM media WHERE id = ?", (media_id,))
             conn.commit()
 
-        self._delete_input_files(media_id)
+        self._delete_aux_files(media_id)
         return True
+
+    def remove_media_files(self, media_id: str, media_type: str, filename: str) -> None:
+        """Remove the file, thumbnail and input files of a media item (DB row untouched)."""
+        self.file_path_for(media_type, filename).unlink(missing_ok=True)
+        self._delete_aux_files(media_id)
+
+    @staticmethod
+    def _delete_aux_files(media_id: str) -> None:
+        try:
+            (THUMBNAILS_DIR / f"{media_id}.jpg").unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Failed to delete thumbnail for %s", media_id, exc_info=True)
+        MediaStorage._delete_input_files(media_id)
 
     @staticmethod
     def _delete_input_files(media_id: str) -> None:

@@ -51,7 +51,7 @@ def _item_from_row(row: Dict[str, Any], is_admin: bool) -> Dict[str, Any]:
         "fileSize": row["file_size"],
         "mimeType": row["mime_type"],
         "userId": row["user_id"],
-        "userEmail": (row["user_email"] or "unknown") if is_admin else None,
+        "userEmail": (row["user_email"] or "deleted user") if is_admin else None,
         "ipAddress": row["ip_address"] if is_admin else None,
         "url": url(f"/api/media/{media_id}"),
         "thumbnailUrl": url(f"/api/media/{media_id}/thumbnail"),
@@ -173,7 +173,10 @@ def _check_access(metadata: Dict[str, Any], db_user: User) -> None:
     media_user_id = metadata.get("userId")
     if media_user_id == db_user.id:
         return
-    if db_user.is_admin and UserManager.can_admin_manage_user(db_user.id, media_user_id):
+    if db_user.is_admin and (
+        UserManager.can_admin_manage_user(db_user.id, media_user_id)
+        or UserManager.get_user_by_id(media_user_id) is None  # kept media of a deleted user
+    ):
         return
     raise HTTPException(status_code=403, detail="Access denied")
 

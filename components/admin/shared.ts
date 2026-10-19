@@ -9,6 +9,7 @@ export interface User {
   isShared: boolean;
   sharedWith: string[] | null;
   tags?: string[] | null;
+  mediaCount?: number;
 }
 
 export interface Quota {

@@ -29,6 +29,8 @@ export default function UserTable({
   onToggleSelectAll,
   onToggleActive,
   onResetPassword,
+  onDelete,
+  currentEmail,
   onQuotaChange,
   onQuotaSave,
   onQuotaCancel,
@@ -47,6 +49,9 @@ export default function UserTable({
   onToggleSelectAll: () => void;
   onToggleActive: (userId: string, currentActive: boolean) => void;
   onResetPassword: (userId: string, email: string) => void;
+  onDelete: (user: UserWithQuotas) => void;
+  /** Email of the signed-in admin (cannot delete themselves). */
+  currentEmail?: string;
   onQuotaChange: (
     userId: string,
     type: GenerationType,
@@ -190,6 +195,14 @@ export default function UserTable({
                         >
                           Reset PWD
                         </button>
+                        {!usr.isAdmin && usr.email !== currentEmail && (
+                          <button
+                            onClick={() => onDelete(usr)}
+                            className="px-3 py-1 text-xs font-medium rounded bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/50"
+                          >
+                            Delete
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

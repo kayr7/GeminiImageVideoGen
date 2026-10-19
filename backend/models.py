@@ -148,6 +148,11 @@ class BulkCreateUsersRequest(BaseModel):
     defaultTags: Optional[List[str]] = None
 
 
+class BulkDeleteUsersRequest(BaseModel):
+    userIds: List[str] = Field(..., min_length=1, max_length=500)
+    deleteMedia: bool = True
+
+
 class UpdateUserRequest(BaseModel):
     isActive: Optional[bool] = None
 

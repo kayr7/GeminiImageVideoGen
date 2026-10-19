@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status, Depends
+import logging
+
+from typing import Optional, Tuple
+
+from fastapi import APIRouter, HTTPException, Query, status, Depends
 
 from models import (
     BulkCreateUsersRequest,
+    BulkDeleteUsersRequest,
     UpdateUserRequest,
     UpdateUserTagsRequest,
     SuccessResponse,
     LoginUser,
 )
 from utils.auth import require_admin
-from utils.user_manager import UserManager
+from utils.user_manager import User, UserManager, get_env_admin_username
 from utils.quota_manager import QuotaManager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -115,6 +122,7 @@ async def list_users(admin: LoginUser = Depends(require_admin)) -> SuccessRespon
     # Get users managed by this admin
     users = UserManager.get_admin_users(admin_user.id)
 
+    media_counts = UserManager.count_media_by_user()
     user_list = []
     for user in users:
         # Check if user is shared with other admins
@@ -142,10 +150,94 @@ async def list_users(admin: LoginUser = Depends(require_admin)) -> SuccessRespon
                 "isShared": is_shared,
                 "sharedWith": other_admins if is_shared else None,
                 "tags": UserManager.get_user_tags(user.id),
+                "mediaCount": media_counts.get(user.id, 0),
             }
         )
 
     return SuccessResponse(success=True, data={"users": user_list})
+
+
+def _deletion_block(admin_user: User, user_id: str) -> Optional[Tuple[int, str]]:
+    """(status, reason) if admin_user may not delete user_id, else None."""
+    user = UserManager.get_user_by_id(user_id)
+    if not user:
+        return status.HTTP_404_NOT_FOUND, "User not found"
+    if user.id == admin_user.id:
+        return status.HTTP_400_BAD_REQUEST, "You cannot delete your own account"
+    if not UserManager.can_admin_manage_user(admin_user.id, user_id):
+        return (
+            status.HTTP_403_FORBIDDEN,
+            "You don't have permission to delete this user",
+        )
+    if user.is_admin:
+        return status.HTTP_400_BAD_REQUEST, "Remove admin rights before deleting"
+    env_admin = get_env_admin_username()
+    if env_admin and user.email == env_admin.lower().strip():
+        return (
+            status.HTTP_400_BAD_REQUEST,
+            "The environment-configured admin cannot be deleted",
+        )
+    return None
+
+
+def _current_admin(admin: LoginUser) -> User:
+    admin_user = UserManager.get_user_by_email(admin.username)
+    if not admin_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Admin user not found"
+        )
+    return admin_user
+
+
+@router.post("/bulk-delete", response_model=SuccessResponse)
+async def bulk_delete_users(
+    request: BulkDeleteUsersRequest, admin: LoginUser = Depends(require_admin)
+) -> SuccessResponse:
+    """Delete several users; applies the single-delete rules per user and continues on failure."""
+    admin_user = _current_admin(admin)
+    deleted, failed, deleted_media = [], [], 0
+    for user_id in dict.fromkeys(request.userIds):
+        block = _deletion_block(admin_user, user_id)
+        if block:
+            failed.append({"userId": user_id, "reason": block[1]})
+            continue
+        try:
+            result = UserManager.delete_user(user_id, delete_media=request.deleteMedia)
+        except Exception:
+            logger.exception("Failed to delete user %s", user_id)
+            failed.append({"userId": user_id, "reason": "Internal error while deleting"})
+            continue
+        if result is None:
+            failed.append({"userId": user_id, "reason": "User not found"})
+            continue
+        deleted.append(user_id)
+        deleted_media += result["deletedMedia"]
+    return SuccessResponse(
+        success=True,
+        data={"deleted": deleted, "failed": failed, "deletedMedia": deleted_media},
+    )
+
+
+@router.delete("/{user_id}", response_model=SuccessResponse)
+async def delete_user(
+    user_id: str,
+    deleteMedia: bool = Query(True, description="Also delete the user's generated media"),
+    admin: LoginUser = Depends(require_admin),
+) -> SuccessResponse:
+    """
+    Delete a user (sessions, quotas, tags, admin links, chats, templates are removed).
+    With deleteMedia=false the media stays and remains visible to all admins as "deleted user".
+    """
+    admin_user = _current_admin(admin)
+    block = _deletion_block(admin_user, user_id)
+    if block:
+        raise HTTPException(status_code=block[0], detail=block[1])
+    result = UserManager.delete_user(user_id, delete_media=deleteMedia)
+    if result is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+    return SuccessResponse(success=True, data=result)
 
 
 @router.get("/{user_id}", response_model=SuccessResponse)

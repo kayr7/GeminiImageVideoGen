@@ -7,6 +7,7 @@ export default function BatchActionBar({
   onSetQuotas,
   onSetTags,
   onResetPasswords,
+  onDelete,
   onClear,
 }: {
   count: number;
@@ -15,6 +16,7 @@ export default function BatchActionBar({
   onSetQuotas: () => void;
   onSetTags: () => void;
   onResetPasswords: () => void;
+  onDelete: () => void;
   onClear: () => void;
 }) {
   return (
@@ -35,6 +37,9 @@ export default function BatchActionBar({
       </button>
       <button onClick={onResetPasswords} className={`${BTN} bg-yellow-500 hover:bg-yellow-400 text-yellow-900`}>
         Reset Passwords
+      </button>
+      <button onClick={onDelete} className={`${BTN} bg-red-700 hover:bg-red-600`}>
+        Delete selected
       </button>
       <div className="flex-1" />
       <button onClick={onClear} className={`${BTN} bg-white/20 hover:bg-white/30`}>
