@@ -1,131 +1,111 @@
 """Media storage endpoints for retrieving saved images and videos."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from typing import Optional, Tuple
-from io import BytesIO
 import base64
-from PIL import Image
-from pathlib import Path
+import logging
+import os
+from io import BytesIO
+from typing import Any, Dict, Optional, Tuple
 
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from PIL import Image
+
+import utils.media_storage as media_storage
 from models import SuccessResponse, LoginUser
-from utils.media_storage import get_media_storage, THUMBNAILS_DIR
-from utils.video_frame_extractor import extract_frames
-from utils.auth import require_admin, get_current_user_with_db
+from utils import media_inputs
+from utils.auth import get_current_user_with_db
+from utils.media_storage import get_media_storage
+from utils.media_urls import sign_media_path, verify
 from utils.user_manager import User, UserManager
-from utils.database import get_connection
+from utils.video_frame_extractor import extract_frames
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 # Thumbnail configuration
 THUMBNAIL_MAX_SIZE = (400, 400)  # Maximum thumbnail dimensions
 
+# Signed URLs are capabilities, so browsers may cache them but shared caches must not.
+CACHE_HEADERS = {"Cache-Control": "private, max-age=86400"}
+
 # Note: Specific routes like /list and /stats must come BEFORE parameterized routes like /{media_id}
 # Otherwise FastAPI will try to match "list" as a media_id parameter
 
 
+def _item_from_row(row: Dict[str, Any], is_admin: bool) -> Dict[str, Any]:
+    media_id = row["id"]
+
+    def url(path: str) -> str:
+        return sign_media_path(media_id, path)
+
+    def input_url(kind: str, index: int) -> str:
+        return url(f"/api/media/{media_id}/inputs/{kind}/{index}")
+
+    return {
+        "id": media_id,
+        "type": row["type"],
+        "prompt": row["prompt"],
+        "model": row["model"],
+        "createdAt": row["created_at"],
+        "fileSize": row["file_size"],
+        "mimeType": row["mime_type"],
+        "userId": row["user_id"],
+        "userEmail": (row["user_email"] or "deleted user") if is_admin else None,
+        "ipAddress": row["ip_address"] if is_admin else None,
+        "url": url(f"/api/media/{media_id}"),
+        "thumbnailUrl": url(f"/api/media/{media_id}/thumbnail"),
+        "details": {
+            "mode": row["mode"] if isinstance(row["mode"], str) else None,
+            "negativePrompt": row["negative_prompt"] if isinstance(row["negative_prompt"], str) else None,
+            "firstFrame": input_url("firstFrame", 0) if row["has_first"] else None,
+            "lastFrame": input_url("lastFrame", 0) if row["has_last"] else None,
+            "referenceImages": [input_url("referenceImages", i) for i in range(row["reference_count"] or 0)],
+            "sourceImages": [input_url("sourceImages", i) for i in range(row["source_count"] or 0)],
+        },
+    }
+
+
 @router.get("/list", response_model=SuccessResponse)
-async def list_media(
-    type: Optional[str] = Query(None, description="Filter by type: 'image' or 'video'"),
+def list_media(
+    type: Optional[str] = Query(None, description="Filter by type: 'image', 'video' or 'audio'"),
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(20, ge=1, le=100, description="Items per page"),
     auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
 ):
     """
-    List media for the current user.
-    Regular users see only their own media.
-    Admins see media from users they invited.
+    List media for the current user (slim items with signed URLs, never inline image data).
+    Regular users see only their own media; admins also media of users they manage.
     """
     try:
-        login_user, db_user = auth
-        storage = get_media_storage()
-        offset = (page - 1) * limit
-
-        # Check if admin
+        _, db_user = auth
         is_admin = db_user.is_admin
-        media_list = []
-        total_count = 0
-
-        if is_admin:
-            # Admin: Get media from all users they invited
-            managed_user_ids = [
-                user.id for user in UserManager.get_admin_users(db_user.id)
-            ]
-            # Include admin's own media
-            managed_user_ids.append(db_user.id)
-
-            with get_connection() as conn:
-                placeholders = ",".join("?" * len(managed_user_ids))
-                base_query = f"FROM media WHERE user_id IN ({placeholders})"
-                params = list(managed_user_ids)
-
-                if type:
-                    base_query += " AND type = ?"
-                    params.append(type)
-
-                # Get total count
-                count_query = f"SELECT COUNT(*) {base_query}"
-                total_count = conn.execute(count_query, params).fetchone()[0]
-
-                # Get paginated items
-                query = f"""
-                    SELECT id, type, prompt, model, user_id, created_at,
-                           file_size, mime_type, details, ip_address
-                    {base_query}
-                    ORDER BY created_at DESC LIMIT ? OFFSET ?
-                """
-                params.append(limit)
-                params.append(offset)
-
-                rows = conn.execute(query, params).fetchall()
-
-                # Build media list with user email and IP
-                for row in rows:
-                    user = UserManager.get_user_by_id(row["user_id"])
-                    media_item = {
-                        "id": row["id"],
-                        "type": row["type"],
-                        "prompt": row["prompt"],
-                        "model": row["model"],
-                        "userId": row["user_id"],
-                        "userEmail": user.email if user else "unknown",
-                        "createdAt": row["created_at"],
-                        "fileSize": row["file_size"],
-                        "mimeType": row["mime_type"],
-                        "details": row["details"],
-                        "ipAddress": row["ip_address"],
-                        "url": f"/api/media/{row['id']}",
-                        "thumbnailUrl": f"/api/media/{row['id']}/thumbnail",
-                    }
-                    media_list.append(media_item)
-        else:
-            # Regular user: Only see own media
-            total_count = storage.count_user_media(db_user.id, media_type=type)
-            media_list = storage.list_user_media(
-                db_user.id, media_type=type, limit=limit, offset=offset
-            )
-
-            # Add URL to each item
-            for item in media_list:
-                item["url"] = f"/api/media/{item['id']}"
-                item["thumbnailUrl"] = f"/api/media/{item['id']}/thumbnail"
+        rows, total = get_media_storage().list_media_summaries(
+            user_id=None if is_admin else db_user.id,
+            admin_id=db_user.id if is_admin else None,
+            media_type=type,
+            limit=limit,
+            offset=(page - 1) * limit,
+        )
 
         return SuccessResponse(
             success=True,
             data={
-                "media": media_list,
-                "total": total_count,
+                "media": [_item_from_row(row, is_admin) for row in rows],
+                "total": total,
                 "page": page,
                 "limit": limit,
-                "pages": (total_count + limit - 1) // limit,
+                "pages": (total + limit - 1) // limit,
             },
         )
 
     except Exception as e:
+        logger.exception("Media request failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/stats", response_model=SuccessResponse)
-async def get_stats(auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db)):
+def get_stats(auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db)):
     """
     Get storage statistics.
     Admins see stats for all users they manage.
@@ -148,274 +128,7 @@ async def get_stats(auth: Tuple[LoginUser, User] = Depends(get_current_user_with
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# Parameterized routes must come AFTER specific routes
-@router.get("/{media_id}/thumbnail")
-async def get_media_thumbnail(
-    media_id: str, auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db)
-):
-    """
-    Retrieve a thumbnail of a media file by ID.
-    For images: generates a resized thumbnail (cached on disk).
-    For videos: returns a placeholder (videos require video processing libs).
-    Users can only access their own media.
-    Admins can access media from users they manage.
-    """
-    try:
-        login_user, db_user = auth
-        storage = get_media_storage()
-        result = storage.get_media(media_id)
-
-        if not result:
-            raise HTTPException(status_code=404, detail="Media not found")
-
-        # Check if user has access to this media
-        media_user_id = result["metadata"].get("userId")
-
-        if not db_user.is_admin:
-            # Regular user: Can only access own media
-            if media_user_id != db_user.id:
-                raise HTTPException(status_code=403, detail="Access denied")
-        else:
-            # Admin: Can access media from users they manage
-            if media_user_id != db_user.id:
-                # Check if admin manages this user
-                if not UserManager.can_admin_manage_user(db_user.id, media_user_id):
-                    raise HTTPException(status_code=403, detail="Access denied")
-
-        media_type = result["metadata"].get("type", "").lower()
-
-        if media_type == "image":
-            # Check if thumbnail already exists on disk
-            thumbnail_path = THUMBNAILS_DIR / f"{media_id}.jpg"
-
-            if thumbnail_path.exists():
-                # Return cached thumbnail
-                try:
-                    thumbnail_data = thumbnail_path.read_bytes()
-                    return Response(
-                        content=thumbnail_data,
-                        media_type="image/jpeg",
-                        headers={
-                            "Content-Disposition": f'inline; filename="{media_id}_thumb.jpg"',
-                            "Cache-Control": "public, max-age=31536000",
-                        },
-                    )
-                except Exception as e:
-                    # If reading cached thumbnail fails, regenerate
-                    print(f"Failed to read cached thumbnail: {e}")
-
-            # Generate thumbnail for image
-            try:
-                img = Image.open(BytesIO(result["data"]))
-
-                # Convert RGBA to RGB if necessary
-                if img.mode in ("RGBA", "LA", "P"):
-                    # Create white background
-                    background = Image.new("RGB", img.size, (255, 255, 255))
-                    if img.mode == "P":
-                        img = img.convert("RGBA")
-                    background.paste(
-                        img,
-                        mask=img.split()[-1] if img.mode in ("RGBA", "LA") else None,
-                    )
-                    img = background
-                elif img.mode != "RGB":
-                    img = img.convert("RGB")
-
-                # Create thumbnail
-                img.thumbnail(THUMBNAIL_MAX_SIZE, Image.Resampling.LANCZOS)
-
-                # Save to BytesIO
-                thumbnail_io = BytesIO()
-                img.save(thumbnail_io, format="JPEG", quality=85, optimize=True)
-                thumbnail_data = thumbnail_io.getvalue()
-
-                # Save thumbnail to disk for future use
-                try:
-                    thumbnail_path.write_bytes(thumbnail_data)
-                except Exception as e:
-                    # Log error but continue (caching is optional)
-                    print(f"Failed to cache thumbnail: {e}")
-
-                return Response(
-                    content=thumbnail_data,
-                    media_type="image/jpeg",
-                    headers={
-                        "Content-Disposition": f'inline; filename="{media_id}_thumb.jpg"',
-                        "Cache-Control": "public, max-age=31536000",
-                    },
-                )
-            except Exception as e:
-                # If thumbnail generation fails, return original
-                print(f"Thumbnail generation failed: {e}")
-                return Response(
-                    content=result["data"],
-                    media_type=result["metadata"]["mimeType"],
-                    headers={
-                        "Content-Disposition": f'inline; filename="{media_id}.{get_extension(result["metadata"]["mimeType"])}"',
-                        "Cache-Control": "public, max-age=31536000",
-                    },
-                )
-        else:
-            # For videos, check if thumbnail already exists on disk
-            thumbnail_path = THUMBNAILS_DIR / f"{media_id}.jpg"
-
-            if thumbnail_path.exists():
-                # Return cached thumbnail
-                try:
-                    thumbnail_data = thumbnail_path.read_bytes()
-                    return Response(
-                        content=thumbnail_data,
-                        media_type="image/jpeg",
-                        headers={
-                            "Content-Disposition": f'inline; filename="{media_id}_thumb.jpg"',
-                            "Cache-Control": "public, max-age=31536000",
-                        },
-                    )
-                except Exception as e:
-                    print(f"Failed to read cached thumbnail: {e}")
-
-            # Generate thumbnail for video
-            try:
-                # Extract first frame
-                first_frame_b64, _ = extract_frames(result["data"])
-                
-                if first_frame_b64:
-                    # Save thumbnail to disk
-                    storage.save_thumbnail(media_id, first_frame_b64)
-                    
-                    # Decode for response
-                    thumbnail_data = base64.b64decode(first_frame_b64)
-                    
-                    return Response(
-                        content=thumbnail_data,
-                        media_type="image/jpeg",
-                        headers={
-                            "Content-Disposition": f'inline; filename="{media_id}_thumb.jpg"',
-                            "Cache-Control": "public, max-age=31536000",
-                        },
-                    )
-            except Exception as e:
-                print(f"Video thumbnail generation failed: {e}")
-
-            # Fallback: return the original video
-            return Response(
-                content=result["data"],
-                media_type=result["metadata"]["mimeType"],
-                headers={
-                    "Content-Disposition": f'inline; filename="{media_id}.{get_extension(result["metadata"]["mimeType"])}"',
-                    "Cache-Control": "public, max-age=31536000",
-                },
-            )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/{media_id}")
-async def get_media(
-    media_id: str, auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db)
-):
-    """
-    Retrieve a specific media file by ID.
-    Users can only access their own media.
-    Admins can access media from users they manage.
-    """
-    try:
-        login_user, db_user = auth
-        storage = get_media_storage()
-        result = storage.get_media(media_id)
-
-        if not result:
-            raise HTTPException(status_code=404, detail="Media not found")
-
-        # Check if user has access to this media
-        media_user_id = result["metadata"].get("userId")
-
-        if not db_user.is_admin:
-            # Regular user: Can only access own media
-            if media_user_id != db_user.id:
-                raise HTTPException(status_code=403, detail="Access denied")
-        else:
-            # Admin: Can access media from users they manage
-            if media_user_id != db_user.id:
-                # Check if admin manages this user
-                if not UserManager.can_admin_manage_user(db_user.id, media_user_id):
-                    raise HTTPException(status_code=403, detail="Access denied")
-
-        # Return binary file with appropriate headers
-        return Response(
-            content=result["data"],
-            media_type=result["metadata"]["mimeType"],
-            headers={
-                "Content-Disposition": f'inline; filename="{media_id}.{get_extension(result["metadata"]["mimeType"])}"',
-                "Cache-Control": "public, max-age=31536000",
-            },
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/{media_id}", response_model=SuccessResponse)
-async def delete_media(
-    media_id: str, auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db)
-):
-    """
-    Delete a specific media item.
-    Users can delete their own media.
-    Admins can delete media from users they manage.
-    """
-    try:
-        login_user, db_user = auth
-        storage = get_media_storage()
-
-        # Get media to check ownership
-        result = storage.get_media(media_id)
-        if not result:
-            raise HTTPException(status_code=404, detail="Media not found")
-
-        media_user_id = result["metadata"].get("userId")
-
-        # Check permissions
-        if not db_user.is_admin:
-            # Regular user: Can only delete own media
-            if media_user_id != db_user.id:
-                raise HTTPException(status_code=403, detail="Access denied")
-        else:
-            # Admin: Can delete media from users they manage
-            if media_user_id != db_user.id:
-                if not UserManager.can_admin_manage_user(db_user.id, media_user_id):
-                    raise HTTPException(status_code=403, detail="Access denied")
-
-        deleted = storage.delete_media(media_id)
-
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Media not found")
-
-        # Delete cached thumbnail if it exists
-        thumbnail_path = THUMBNAILS_DIR / f"{media_id}.jpg"
-        if thumbnail_path.exists():
-            try:
-                thumbnail_path.unlink()
-            except Exception as e:
-                # Log error but don't fail the request
-                print(f"Failed to delete thumbnail cache: {e}")
-
-        return SuccessResponse(
-            success=True, data={"mediaId": media_id, "deleted": True}
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
+        logger.exception("Media request failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -431,3 +144,234 @@ def get_extension(mime_type: str) -> str:
         "image/gif": "gif",
     }
     return extensions.get(mime_type, "bin")
+
+
+def authorize_media(
+    media_id: str,
+    exp: Optional[str] = Query(None, description="Signed URL expiry (unix seconds)"),
+    sig: Optional[str] = Query(None, description="Signed URL signature"),
+    authorization: Optional[str] = Header(default=None),
+) -> Dict[str, Any]:
+    """Authorise a media read by signed URL or Bearer token; return cheap metadata (404 if unknown)."""
+    signed_ok = exp is not None and sig is not None and verify(media_id, exp, sig)
+    if not signed_ok and not (authorization or "").startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid or expired media URL")
+
+    db_user = None
+    if not signed_ok:
+        _, db_user = get_current_user_with_db(authorization)
+
+    metadata = get_media_storage().get_media_metadata(media_id)
+    if not metadata:
+        raise HTTPException(status_code=404, detail="Media not found")
+    if db_user is not None:
+        _check_access(metadata, db_user)
+    return metadata
+
+
+def _check_access(metadata: Dict[str, Any], db_user: User) -> None:
+    media_user_id = metadata.get("userId")
+    if media_user_id == db_user.id:
+        return
+    if db_user.is_admin and (
+        UserManager.can_admin_manage_user(db_user.id, media_user_id)
+        or UserManager.get_user_by_id(media_user_id) is None  # kept media of a deleted user
+    ):
+        return
+    raise HTTPException(status_code=403, detail="Access denied")
+
+
+def _media_file(metadata: Dict[str, Any]):
+    path = get_media_storage().file_path_for(metadata["type"], metadata["filename"])
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Media file not found")
+    return path
+
+
+def _parse_range(header: str, size: int) -> Optional[Tuple[int, int]]:
+    """Parse a single ``bytes=a-b`` range into inclusive (start, end); None if unsatisfiable/unsupported."""
+    unit, _, spec = header.partition("=")
+    if unit.strip().lower() != "bytes" or "," in spec:
+        return None
+    first, _, last = spec.strip().partition("-")
+    try:
+        if first == "":  # suffix range: last N bytes
+            length = int(last)
+            if length <= 0:
+                return None
+            return max(size - length, 0), size - 1
+        start = int(first)
+        end = int(last) if last else size - 1
+    except ValueError:
+        return None
+    end = min(end, size - 1)
+    if start > end or start >= size:
+        return None
+    return start, end
+
+
+def _iter_file(path, start: int, end: int, chunk: int = 256 * 1024):
+    with open(path, "rb") as fh:
+        fh.seek(start)
+        remaining = end - start + 1
+        while remaining > 0:
+            data = fh.read(min(chunk, remaining))
+            if not data:
+                break
+            remaining -= len(data)
+            yield data
+
+
+def _original_response(media_id: str, metadata: Dict[str, Any], request: Optional[Request] = None):
+    """Serve the file from disk (streamed), honouring HTTP Range for video seeking."""
+    mime_type = metadata["mimeType"]
+    path = _media_file(metadata)
+    headers = {
+        "Content-Disposition": f'inline; filename="{media_id}.{get_extension(mime_type)}"',
+        "Accept-Ranges": "bytes",
+        **CACHE_HEADERS,
+    }
+    range_header = request.headers.get("range") if request is not None else None
+    if range_header:
+        size = path.stat().st_size
+        byte_range = _parse_range(range_header, size)
+        if byte_range is None:
+            return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+        start, end = byte_range
+        headers.update({"Content-Range": f"bytes {start}-{end}/{size}", "Content-Length": str(end - start + 1)})
+        return StreamingResponse(
+            _iter_file(path, start, end), status_code=206, media_type=mime_type, headers=headers
+        )
+    return FileResponse(path, media_type=mime_type, headers=headers)
+
+
+def _jpeg_response(path, filename: str) -> FileResponse:
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        headers={"Content-Disposition": f'inline; filename="{filename}"', **CACHE_HEADERS},
+    )
+
+
+def _write_atomic(path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+def _make_image_thumbnail(source) -> bytes:
+    """Resize an image (path or bytes) to a JPEG thumbnail (transparency flattened onto white)."""
+    img = Image.open(BytesIO(source) if isinstance(source, bytes) else source)
+
+    if img.mode in ("RGBA", "LA", "P"):
+        img = img.convert("RGBA")
+        background = Image.new("RGB", img.size, (255, 255, 255))
+        background.paste(img, mask=img.split()[-1])
+        img = background
+    elif img.mode != "RGB":
+        img = img.convert("RGB")
+
+    img.thumbnail(THUMBNAIL_MAX_SIZE, Image.Resampling.LANCZOS)
+    out = BytesIO()
+    img.save(out, format="JPEG", quality=85, optimize=True)
+    return out.getvalue()
+
+
+@router.get("/{media_id}/thumbnail")
+def get_media_thumbnail(media_id: str, request: Request, metadata: Dict[str, Any] = Depends(authorize_media)):
+    """
+    Retrieve a thumbnail of a media file by ID (cached on disk).
+    Images are resized; videos use their extracted first frame.
+    Falls back to the original file if no thumbnail can be produced.
+    Access: valid signed URL, or Bearer token of the owner / managing admin.
+    """
+    thumbnail_path = media_storage.THUMBNAILS_DIR / f"{media_id}.jpg"
+    if thumbnail_path.is_file():
+        return _jpeg_response(thumbnail_path, f"{media_id}_thumb.jpg")
+
+    # Only now is the original read.
+    original = _media_file(metadata)
+    try:
+        if metadata["type"].lower() == "image":
+            thumbnail_data = _make_image_thumbnail(original)
+        else:
+            first_frame_b64, _ = extract_frames(original.read_bytes())
+            thumbnail_data = base64.b64decode(first_frame_b64) if first_frame_b64 else None
+        if thumbnail_data:
+            try:
+                _write_atomic(thumbnail_path, thumbnail_data)
+                return _jpeg_response(thumbnail_path, f"{media_id}_thumb.jpg")
+            except OSError:
+                logger.warning("Failed to cache thumbnail %s", media_id, exc_info=True)
+                return Response(content=thumbnail_data, media_type="image/jpeg", headers=CACHE_HEADERS)
+    except Exception:
+        logger.warning("Thumbnail generation failed for %s", media_id, exc_info=True)
+
+    return _original_response(media_id, metadata, request)
+
+
+@router.get("/{media_id}/inputs/{kind}/{index}")
+def get_media_input(
+    media_id: str,
+    kind: str,
+    index: int,
+    metadata: Dict[str, Any] = Depends(authorize_media),
+):
+    """JPEG preview (max 256 px) of an input image used to generate this media."""
+    if kind not in media_inputs.INPUT_KINDS or index < 0:
+        raise HTTPException(status_code=404, detail="Input not found")
+
+    root = media_storage.STORAGE_ROOT
+    cached = media_inputs.preview_path(root, media_id, kind, index)
+    if cached.is_file():
+        return _jpeg_response(cached, cached.name)
+
+    details = get_media_storage().get_media_details(media_id)
+    source = media_inputs.load_input_bytes(media_id, details, kind, index, root)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Input not found")
+    try:
+        preview = media_inputs.make_preview(source)
+    except Exception:
+        logger.warning("Input preview failed for %s/%s/%s", media_id, kind, index, exc_info=True)
+        raise HTTPException(status_code=404, detail="Input not readable")
+    try:
+        media_inputs.write_preview(cached, preview)
+        return _jpeg_response(cached, cached.name)
+    except OSError:
+        return Response(content=preview, media_type="image/jpeg", headers=CACHE_HEADERS)
+
+
+@router.get("/{media_id}")
+def get_media(media_id: str, request: Request, metadata: Dict[str, Any] = Depends(authorize_media)):
+    """
+    Retrieve a specific media file by ID (supports HTTP Range for video seeking).
+    Access: valid signed URL, or Bearer token of the owner / managing admin.
+    """
+    return _original_response(media_id, metadata, request)
+
+
+@router.delete("/{media_id}", response_model=SuccessResponse)
+def delete_media(
+    media_id: str, auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db)
+):
+    """
+    Delete a specific media item.
+    Users can delete their own media; admins also media of users they manage.
+    """
+    _, db_user = auth
+    metadata = get_media_storage().get_media_metadata(media_id)
+    if not metadata:
+        raise HTTPException(status_code=404, detail="Media not found")
+    _check_access(metadata, db_user)
+
+    if not get_media_storage().delete_media(media_id):
+        raise HTTPException(status_code=404, detail="Media not found")
+
+    try:
+        (media_storage.THUMBNAILS_DIR / f"{media_id}.jpg").unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Failed to delete thumbnail cache %s", media_id, exc_info=True)
+
+    return SuccessResponse(success=True, data={"mediaId": media_id, "deleted": True})

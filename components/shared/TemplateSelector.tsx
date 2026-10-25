@@ -2,20 +2,35 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { templateAPI } from '@/lib/templates/api';
-import { extractVariables, fillTemplate } from '@/lib/templates/utils';
-import type { PromptTemplate, CreateTemplateRequest, UpdateTemplateRequest } from '@/types/text-generation';
+import { extractVariables } from '@/lib/templates/utils';
+import { useAuth } from '@/lib/context/AuthContext';
+import type { PromptTemplate } from '@/types/text-generation';
+import Modal from '../admin/Modal';
 import Button from '../ui/Button';
 import Select from '../ui/Select';
 import Input from '../ui/Input';
 
 interface TemplateSelectorProps {
   mediaType: 'text' | 'image' | 'video';
-  value: string; // The current prompt text
-  onChange: (value: string) => void; // Called when the filled template changes
+  /** The current (raw) prompt text, which may contain `{{placeholders}}`. */
+  value: string;
+  /** Called with the template's raw text when a template is selected. */
+  onChange: (value: string) => void;
   disabled?: boolean;
   label?: string;
 }
 
+/**
+ * Pick, save, update and delete prompt templates.
+ *
+ * Selecting a template copies its RAW text (with `{{placeholders}}`) into the
+ * prompt box via `onChange`. The prompt box is therefore the editable template
+ * text: "Update Current Template" / "Save as New Template" store exactly what is
+ * in the prompt box, placeholders included. The placeholder values are filled in
+ * by `<PlaceholderFields>` below the prompt box and resolved when generating.
+ *
+ * Hidden when logged out (templates are personal).
+ */
 export default function TemplateSelector({
   mediaType,
   value,
@@ -23,96 +38,93 @@ export default function TemplateSelector({
   disabled = false,
   label = 'Prompt Template',
 }: TemplateSelectorProps) {
+  const { token } = useAuth();
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
-  const [selectedTemplate, setSelectedTemplate] = useState<PromptTemplate | null>(null);
-  const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [templateName, setTemplateName] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [modalError, setModalError] = useState<string | null>(null);
 
-  // Load templates
+  const selectedTemplate = templates.find((t) => t.id === selectedTemplateId) ?? null;
+
   const loadTemplates = useCallback(async () => {
     try {
       const loaded = await templateAPI.list(mediaType);
       setTemplates(loaded);
     } catch (err) {
-      console.error('Failed to load templates:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load templates');
     }
   }, [mediaType]);
 
   useEffect(() => {
-    loadTemplates();
-  }, [loadTemplates]);
-
-  // Update selected template when selection changes
-  useEffect(() => {
-    if (selectedTemplateId) {
-      const template = templates.find((t) => t.id === selectedTemplateId);
-      setSelectedTemplate(template || null);
-      
-      if (template) {
-        // Initialize variable values
-        const vars = extractVariables(template.templateText);
-        const initialValues: Record<string, string> = {};
-        vars.forEach((v) => {
-          initialValues[v] = '';
-        });
-        setVariableValues(initialValues);
-      }
-    } else {
-      setSelectedTemplate(null);
-      setVariableValues({});
+    if (!token) {
+      setTemplates([]);
+      setSelectedTemplateId('');
+      return;
     }
-  }, [selectedTemplateId, templates]);
+    void loadTemplates();
+  }, [token, loadTemplates]);
 
-  // Fill template and update parent when variables change
-  useEffect(() => {
-    if (selectedTemplate) {
-      const filled = fillTemplate(selectedTemplate.templateText, variableValues);
-      onChange(filled);
+  if (!token) {
+    return null;
+  }
+
+  const isModified = !!selectedTemplate && selectedTemplate.templateText !== value;
+
+  const handleSelect = (templateId: string) => {
+    setError(null);
+    if (!templateId) {
+      setSelectedTemplateId('');
+      return;
     }
-  }, [selectedTemplate, variableValues, onChange]);
+    const template = templates.find((t) => t.id === templateId);
+    if (!template) return;
 
-  const handleVariableChange = (variable: string, newValue: string) => {
-    setVariableValues((prev) => ({
-      ...prev,
-      [variable]: newValue,
-    }));
+    const current = value.trim();
+    const unchanged = !current || current === selectedTemplate?.templateText.trim();
+    if (
+      !unchanged &&
+      current !== template.templateText.trim() &&
+      !window.confirm(`Replace the current prompt with the template "${template.name}"?`)
+    ) {
+      return;
+    }
+
+    setSelectedTemplateId(template.id);
+    onChange(template.templateText);
   };
 
-  const handleClearTemplate = () => {
-    setSelectedTemplateId('');
-    setSelectedTemplate(null);
-    setVariableValues({});
+  const openSaveModal = () => {
+    setTemplateName('');
+    setModalError(null);
+    setShowSaveModal(true);
   };
 
   const handleSaveAsNewTemplate = async () => {
     if (!templateName.trim()) {
-      setError('Template name is required');
+      setModalError('Template name is required');
       return;
     }
 
     setSaving(true);
-    setError(null);
+    setModalError(null);
 
     try {
-      const variables = extractVariables(value);
-      const request: CreateTemplateRequest = {
+      const created = await templateAPI.create({
         name: templateName.trim(),
         mediaType,
         templateText: value,
-        variables,
-      };
-
-      await templateAPI.create(request);
+        variables: extractVariables(value),
+      });
       await loadTemplates();
+      setSelectedTemplateId(created.id);
       setShowSaveModal(false);
       setTemplateName('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save template');
+      setModalError(err instanceof Error ? err.message : 'Failed to save template');
     } finally {
       setSaving(false);
     }
@@ -122,37 +134,51 @@ export default function TemplateSelector({
     if (!selectedTemplate) return;
 
     setSaving(true);
-    setError(null);
+    setModalError(null);
 
     try {
-      const variables = extractVariables(value);
-      const request: UpdateTemplateRequest = {
+      const updated = await templateAPI.update(selectedTemplate.id, {
         templateText: value,
-        variables,
-      };
-
-      await templateAPI.update(selectedTemplate.id, request);
-      await loadTemplates();
+        variables: extractVariables(value),
+      });
+      setTemplates((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
       setShowUpdateModal(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update template');
+      setModalError(err instanceof Error ? err.message : 'Failed to update template');
     } finally {
       setSaving(false);
     }
   };
 
-  const variables = selectedTemplate ? extractVariables(selectedTemplate.templateText) : [];
+  const handleDeleteTemplate = async () => {
+    if (!selectedTemplate) return;
+    if (!window.confirm(`Delete the template "${selectedTemplate.name}"? This cannot be undone.`)) {
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      await templateAPI.delete(selectedTemplate.id);
+      setTemplates((prev) => prev.filter((t) => t.id !== selectedTemplate.id));
+      setSelectedTemplateId('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete template');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <div className="space-y-4">
-      {/* Template Selector */}
+    <div className="space-y-3">
       <div className="flex gap-2">
         <div className="flex-1">
           <Select
             label={label}
+            aria-label={label}
             value={selectedTemplateId}
-            onChange={(e) => setSelectedTemplateId(e.target.value)}
-            disabled={disabled}
+            onChange={(e) => handleSelect(e.target.value)}
+            disabled={disabled || saving}
             options={[
               { value: '', label: '-- No Template --' },
               ...templates.map((t) => ({ value: t.id, label: t.name })),
@@ -162,8 +188,8 @@ export default function TemplateSelector({
         {selectedTemplate && (
           <Button
             variant="secondary"
-            onClick={handleClearTemplate}
-            disabled={disabled}
+            onClick={() => setSelectedTemplateId('')}
+            disabled={disabled || saving}
             className="mt-7"
           >
             Clear
@@ -171,96 +197,106 @@ export default function TemplateSelector({
         )}
       </div>
 
-      {/* Variable Inputs */}
-      {variables.length > 0 && (
-        <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg space-y-3">
-          <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
-            Template Variables
-          </p>
-          {variables.map((variable) => (
-            <Input
-              key={variable}
-              label={variable}
-              value={variableValues[variable] || ''}
-              onChange={(e) => handleVariableChange(variable, e.target.value)}
-              placeholder={`Enter value for ${variable}`}
-              disabled={disabled}
-            />
-          ))}
+      {selectedTemplate && (
+        <p className="text-xs text-gray-600 dark:text-gray-400">
+          The template text is in the prompt box below — edit it there and fill in the{' '}
+          <code>{'{{placeholders}}'}</code> underneath.
+          {isModified && (
+            <span className="text-amber-700 dark:text-amber-300">
+              {' '}
+              Modified — use &quot;Update Current Template&quot; to keep your changes.
+            </span>
+          )}
+        </p>
+      )}
+
+      {error && (
+        <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">
+          {error}
         </div>
       )}
 
-      {/* Save/Update Buttons */}
-      {!disabled && value.trim() && (
-        <div className="flex gap-2">
-          <Button
-            variant="secondary"
-            onClick={() => setShowSaveModal(true)}
-            className="text-sm"
-          >
-            💾 Save as New Template
-          </Button>
+      {!disabled && (value.trim() || selectedTemplate) && (
+        <div className="flex flex-wrap gap-2">
+          {value.trim() && (
+            <Button variant="secondary" size="sm" onClick={openSaveModal}>
+              💾 Save as New Template
+            </Button>
+          )}
+          {selectedTemplate && value.trim() && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setModalError(null);
+                setShowUpdateModal(true);
+              }}
+              disabled={saving}
+            >
+              ✏️ Update Current Template
+            </Button>
+          )}
           {selectedTemplate && (
             <Button
               variant="secondary"
-              onClick={() => setShowUpdateModal(true)}
-              className="text-sm"
+              size="sm"
+              onClick={() => void handleDeleteTemplate()}
+              disabled={saving}
             >
-              ✏️ Update Current Template
+              🗑️ Delete Template
             </Button>
           )}
         </div>
       )}
 
-      {/* Save Modal */}
       {showSaveModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-semibold mb-4">Save Template</h3>
-            <Input
-              label="Template Name"
-              value={templateName}
-              onChange={(e) => setTemplateName(e.target.value)}
-              placeholder="Enter template name"
-            />
-            {error && (
-              <p className="text-sm text-red-600 dark:text-red-400 mt-2">{error}</p>
-            )}
-            <div className="flex gap-2 mt-4">
-              <Button onClick={handleSaveAsNewTemplate} isLoading={saving} disabled={saving}>
-                Save
-              </Button>
-              <Button variant="secondary" onClick={() => setShowSaveModal(false)} disabled={saving}>
-                Cancel
-              </Button>
-            </div>
+        <Modal title="Save Template" subtitle="Saves the prompt text including its {{placeholders}}." maxWidth="max-w-md">
+          <Input
+            label="Template Name"
+            value={templateName}
+            onChange={(e) => setTemplateName(e.target.value)}
+            placeholder="Enter template name"
+            disabled={saving}
+          />
+          {modalError && (
+            <p className="text-sm text-red-600 dark:text-red-400 mt-2" role="alert">
+              {modalError}
+            </p>
+          )}
+          <div className="flex gap-2 mt-4">
+            <Button onClick={() => void handleSaveAsNewTemplate()} isLoading={saving} disabled={saving}>
+              Save
+            </Button>
+            <Button variant="secondary" onClick={() => setShowSaveModal(false)} disabled={saving}>
+              Cancel
+            </Button>
           </div>
-        </div>
+        </Modal>
       )}
 
-      {/* Update Modal */}
       {showUpdateModal && selectedTemplate && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-semibold mb-4">Update Template</h3>
-            <p className="text-sm mb-4">
-              Update template <strong>{selectedTemplate.name}</strong> with current prompt?
+        <Modal title="Update Template" maxWidth="max-w-md">
+          <p className="text-sm text-gray-700 dark:text-gray-300 mb-2">
+            Update template <strong>{selectedTemplate.name}</strong> with the current prompt text?
+          </p>
+          <pre className="text-xs whitespace-pre-wrap max-h-48 overflow-y-auto p-2 rounded bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-gray-200">
+            {value}
+          </pre>
+          {modalError && (
+            <p className="text-sm text-red-600 dark:text-red-400 mt-2" role="alert">
+              {modalError}
             </p>
-            {error && (
-              <p className="text-sm text-red-600 dark:text-red-400 mt-2">{error}</p>
-            )}
-            <div className="flex gap-2 mt-4">
-              <Button onClick={handleUpdateTemplate} isLoading={saving} disabled={saving}>
-                Update
-              </Button>
-              <Button variant="secondary" onClick={() => setShowUpdateModal(false)} disabled={saving}>
-                Cancel
-              </Button>
-            </div>
+          )}
+          <div className="flex gap-2 mt-4">
+            <Button onClick={() => void handleUpdateTemplate()} isLoading={saving} disabled={saving}>
+              Update
+            </Button>
+            <Button variant="secondary" onClick={() => setShowUpdateModal(false)} disabled={saving}>
+              Cancel
+            </Button>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
 }
-

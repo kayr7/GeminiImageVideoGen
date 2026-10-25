@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.9.0] - 2026-10-25
+
+### Added
+- **Personal placeholders (backend)**
+  - Logged-in users can save named values (e.g. `CONTEXT`) that prefill `{{CONTEXT}}` fields in templates and prompts; personal only, up to 100 per user
+  - New endpoints under `/api/placeholders`: list, create, update, delete and upsert by name (`PUT /api/placeholders/by-name/{name}`); names are `[A-Za-z0-9_]{1,64}`, case-sensitive and unique per user; values up to 20,000 characters
+  - New table `user_placeholders` (migration 11), removed together with the user via `ON DELETE CASCADE`
+  - Files: `backend/routers/placeholders.py`, `backend/utils/placeholder_manager.py`, `backend/utils/database.py`, `backend/models.py`, `backend/main.py`
+- **Personal placeholders (frontend)**
+  - Wherever `{{NAME}}` appears — in a selected template or typed straight into the prompt — a field is shown under the prompt, prefilled with the saved value and editable per generation; badges show "saved" / "differs from saved", and "💾 Save as default" stores the current value (text single-turn and chat, image, video)
+  - Placeholders in the text system prompt are filled too, before it is sent
+  - Generating is blocked with a clear message while a placeholder is still empty or the filled-in prompt exceeds the length limit
+  - New "My placeholders" card in the profile to add, edit and delete saved values, with name validation
+  - Files: `components/shared/PlaceholderFields.tsx`, `components/profile/PlaceholdersCard.tsx`, `lib/hooks/usePlaceholders.ts`, `lib/placeholders/api.ts`, `types/placeholders.ts`, `app/profile/page.tsx`, `app/text/page.tsx`, `components/generators/ImageGenerator.tsx`, `components/generators/VideoGenerator.tsx`
+- **Session expiry handling**
+  - When the session token expires, the app logs out and sends you to the login page ("Your session expired, please log in again."), returning to the same page afterwards
+  - Files: `lib/utils/apiClient.ts`, `lib/context/AuthContext.tsx`, `app/login/page.tsx`
+
+### Changed
+- **Template selector (image/video)**
+  - Selecting a template copies its raw text, `{{placeholders}}` included, into the prompt box, which is where the template is edited; "Update Current Template" and "Save as New Template" store that raw text
+  - Templates can now be deleted; the selector is hidden when logged out
+  - Files: `components/shared/TemplateSelector.tsx`
+- **One shared template/placeholder module**
+  - `lib/text/utils.ts` and the text `templateAPI` now re-export `lib/templates/*`
+  - Template, system prompt, text and chat API errors now show the backend's message
+  - Files: `lib/templates/utils.ts`, `lib/templates/api.ts`, `lib/text/utils.ts`, `lib/text/api.ts`, `lib/utils/apiError.ts`
+
+### Fixed
+- "Update Current Template" saved the filled-in prompt, so the template lost its placeholders
+- Multi-turn chat sent `{{variables}}` unfilled
+- Values containing `$&` or `$1` were mangled when a template was filled
+
+### Image & video fixes
+- **Video now uses Gemini Omni Flash** (`gemini-omni-1.1-flash`, Interactions API) — Google retired all Veo preview models (they returned 404)
+  - Jobs run as Omni background interactions; `/api/video/status` polls and stores the result once (media, thumbnail, quota). Job ids are now our own UUIDs; old `/jobs/models/...` ids still resolve
+  - Aspect ratio (16:9/9:16), resolution (360p/720p/1080p/4K) and duration (4/6/8/10 s, API range 3-10 s) are now actually sent; before, the UI values were silently dropped. Unsupported values return 400
+  - First frame, last frame and up to 3 reference images can be combined; the negative prompt is appended as "Avoid: …" (Omni has no negative-prompt field)
+  - The video client has automatic retries disabled so a timeout can never start (and bill) a second video
+  - Clear failure messages: rejected requests (400 with Google's message), filtered outputs ("No video was returned …"), failed/cancelled interactions; transient polling errors keep the job running
+  - On startup, jobs that can never finish (retired Veo models, no interaction id, older than 1 h) are marked failed — fixes three jobs stuck in "processing" since Nov 2025
+  - Price: ~$0.10 per second at 720p (~$0.034/s at 360p); `pricePerVideo` is for the default 8 s clip
+  - UI: controls follow the model capabilities, "Check Status" now really checks (uses `/status`), Omni tips replace the Veo tips, job history shows the mode
+  - Files: `backend/routers/video.py`, `backend/utils/video_queue.py`, `backend/utils/gemini.py`, `backend/utils/config.py`, `backend/models.py`, `backend/main.py`, `components/generators/VideoGenerator.tsx`, `types/index.ts`, `docs/VIDEO.md` (replaces `docs/VEO.md`)
+- **Image generation no longer fails with a bare "No image data in response" (500)**
+  - The Gemini 3.x image models and Nano Banana 2.1 are asked for images only (`response_modalities: ["IMAGE"]`); before, they often answered questions or greetings with text only. Gemini 2.5 Flash Image keeps `["TEXT", "IMAGE"]`
+  - When no image comes back the API returns 422 with an explanation (safety filter — real people/brands are common causes —, "describe the picture you want", or generic) plus the model's text reply, and logs a warning; quota is only charged on success
+  - Google 429 → 429, 5xx → 502, 400 → 400 with a readable message; the final image is preferred over interim "thought" images
+  - The image page shows the backend's message (also for non-JSON error pages)
+  - Files: `backend/routers/image.py`, `backend/utils/config.py`, `components/generators/ImageGenerator.tsx`
+- A blank model id now resolves to the configured default model (admin/env), not just the first enabled one (`backend/utils/config.py`)
+
+---
+
 ## [3.8.1] - 2025-11-16
 
 ### Fixed

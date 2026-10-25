@@ -3,263 +3,164 @@
  */
 
 import { apiFetch } from '@/lib/utils/apiClient';
+import { parseApiResponse } from '@/lib/utils/apiError';
 import type {
-  PromptTemplate,
   SystemPrompt,
   TextGeneration,
   ChatSession,
   ChatMessage,
-  CreateTemplateRequest,
-  UpdateTemplateRequest,
   CreateSystemPromptRequest,
   UpdateSystemPromptRequest,
   TextGenerationRequest,
   CreateChatSessionRequest,
   UpdateChatSessionRequest,
   SendMessageRequest,
-  APIResponse,
 } from '@/types/text-generation';
 
-// Template API
-export const templateAPI = {
-  async list(mediaType?: string): Promise<PromptTemplate[]> {
-    const url = mediaType
-      ? `/api/text/templates?media_type=${mediaType}`
-      : `/api/text/templates`;
-    const response = await apiFetch(url);
-    const data: APIResponse<{ templates: PromptTemplate[] }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to fetch templates');
-    }
-    return data.data?.templates || [];
-  },
+// Template API (shared with the image/video generators)
+export { templateAPI } from '@/lib/templates/api';
 
-  async get(id: string): Promise<PromptTemplate> {
-    const response = await apiFetch(`/api/text/templates/${id}`);
-    const data: APIResponse<{ template: PromptTemplate }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to fetch template');
-    }
-    return data.data!.template;
-  },
+const jsonInit = (method: string, body: unknown): RequestInit => ({
+  method,
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body),
+});
 
-  async create(request: CreateTemplateRequest): Promise<PromptTemplate> {
-    const response = await apiFetch(`/api/text/templates`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    });
-    const data: APIResponse<{ template: PromptTemplate }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to create template');
-    }
-    return data.data!.template;
-  },
-
-  async update(id: string, request: UpdateTemplateRequest): Promise<PromptTemplate> {
-    const response = await apiFetch(`/api/text/templates/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    });
-    const data: APIResponse<{ template: PromptTemplate }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to update template');
-    }
-    return data.data!.template;
-  },
-
-  async delete(id: string): Promise<void> {
-    const response = await apiFetch(`/api/text/templates/${id}`, {
-      method: 'DELETE',
-    });
-    const data: APIResponse<{ templateId: string }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to delete template');
-    }
-  },
-};
+const id = (value: string) => encodeURIComponent(value);
 
 // System Prompt API
 export const systemPromptAPI = {
   async list(mediaType?: string): Promise<SystemPrompt[]> {
     const url = mediaType
-      ? `/api/text/system-prompts?media_type=${mediaType}`
+      ? `/api/text/system-prompts?media_type=${encodeURIComponent(mediaType)}`
       : `/api/text/system-prompts`;
-    const response = await apiFetch(url);
-    const data: APIResponse<{ systemPrompts: SystemPrompt[] }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to fetch system prompts');
-    }
-    return data.data?.systemPrompts || [];
+    const data = await parseApiResponse<{ systemPrompts?: SystemPrompt[] }>(
+      await apiFetch(url),
+      'Failed to fetch system prompts',
+    );
+    return data?.systemPrompts || [];
   },
 
-  async get(id: string): Promise<SystemPrompt> {
-    const response = await apiFetch(`/api/text/system-prompts/${id}`);
-    const data: APIResponse<{ systemPrompt: SystemPrompt }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to fetch system prompt');
-    }
-    return data.data!.systemPrompt;
+  async get(promptId: string): Promise<SystemPrompt> {
+    const data = await parseApiResponse<{ systemPrompt: SystemPrompt }>(
+      await apiFetch(`/api/text/system-prompts/${id(promptId)}`),
+      'Failed to fetch system prompt',
+    );
+    return data.systemPrompt;
   },
 
   async create(request: CreateSystemPromptRequest): Promise<SystemPrompt> {
-    const response = await apiFetch(`/api/text/system-prompts`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    });
-    const data: APIResponse<{ systemPrompt: SystemPrompt }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to create system prompt');
-    }
-    return data.data!.systemPrompt;
+    const data = await parseApiResponse<{ systemPrompt: SystemPrompt }>(
+      await apiFetch(`/api/text/system-prompts`, jsonInit('POST', request)),
+      'Failed to create system prompt',
+    );
+    return data.systemPrompt;
   },
 
-  async update(id: string, request: UpdateSystemPromptRequest): Promise<SystemPrompt> {
-    const response = await apiFetch(`/api/text/system-prompts/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    });
-    const data: APIResponse<{ systemPrompt: SystemPrompt }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to update system prompt');
-    }
-    return data.data!.systemPrompt;
+  async update(promptId: string, request: UpdateSystemPromptRequest): Promise<SystemPrompt> {
+    const data = await parseApiResponse<{ systemPrompt: SystemPrompt }>(
+      await apiFetch(`/api/text/system-prompts/${id(promptId)}`, jsonInit('PUT', request)),
+      'Failed to update system prompt',
+    );
+    return data.systemPrompt;
   },
 
-  async delete(id: string): Promise<void> {
-    const response = await apiFetch(`/api/text/system-prompts/${id}`, {
-      method: 'DELETE',
-    });
-    const data: APIResponse<{ promptId: string }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to delete system prompt');
-    }
+  async delete(promptId: string): Promise<void> {
+    await parseApiResponse<{ promptId: string }>(
+      await apiFetch(`/api/text/system-prompts/${id(promptId)}`, { method: 'DELETE' }),
+      'Failed to delete system prompt',
+    );
   },
 };
 
 // Text Generation API
 export const textGenerationAPI = {
   async generate(request: TextGenerationRequest): Promise<TextGeneration> {
-    const response = await apiFetch(`/api/text/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    });
-    const data: APIResponse<{ generation: TextGeneration }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to generate text');
-    }
-    return data.data!.generation;
+    const data = await parseApiResponse<{ generation: TextGeneration }>(
+      await apiFetch(`/api/text/generate`, jsonInit('POST', request)),
+      'Failed to generate text',
+    );
+    return data.generation;
   },
 
   async getHistory(): Promise<TextGeneration[]> {
-    const response = await apiFetch(`/api/text/history`);
-    const data: APIResponse<{ generations: TextGeneration[] }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to fetch history');
-    }
-    return data.data?.generations || [];
+    const data = await parseApiResponse<{ generations?: TextGeneration[] }>(
+      await apiFetch(`/api/text/history`),
+      'Failed to fetch history',
+    );
+    return data?.generations || [];
   },
 
-  async get(id: string): Promise<TextGeneration> {
-    const response = await apiFetch(`/api/text/history/${id}`);
-    const data: APIResponse<{ generation: TextGeneration }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to fetch generation');
-    }
-    return data.data!.generation;
+  async get(generationId: string): Promise<TextGeneration> {
+    const data = await parseApiResponse<{ generation: TextGeneration }>(
+      await apiFetch(`/api/text/history/${id(generationId)}`),
+      'Failed to fetch generation',
+    );
+    return data.generation;
   },
 
-  async delete(id: string): Promise<void> {
-    const response = await apiFetch(`/api/text/history/${id}`, {
-      method: 'DELETE',
-    });
-    const data: APIResponse<{ generationId: string }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to delete generation');
-    }
+  async delete(generationId: string): Promise<void> {
+    await parseApiResponse<{ generationId: string }>(
+      await apiFetch(`/api/text/history/${id(generationId)}`, { method: 'DELETE' }),
+      'Failed to delete generation',
+    );
   },
 };
 
 // Chat Session API
 export const chatAPI = {
   async listSessions(): Promise<ChatSession[]> {
-    const response = await apiFetch(`/api/text/chat/sessions`);
-    const data: APIResponse<{ sessions: ChatSession[] }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to fetch chat sessions');
-    }
-    return data.data?.sessions || [];
+    const data = await parseApiResponse<{ sessions?: ChatSession[] }>(
+      await apiFetch(`/api/text/chat/sessions`),
+      'Failed to fetch chat sessions',
+    );
+    return data?.sessions || [];
   },
 
-  async getSession(id: string): Promise<ChatSession> {
-    const response = await apiFetch(`/api/text/chat/sessions/${id}`);
-    const data: APIResponse<{ session: ChatSession }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to fetch chat session');
-    }
-    return data.data!.session;
+  async getSession(sessionId: string): Promise<ChatSession> {
+    const data = await parseApiResponse<{ session: ChatSession }>(
+      await apiFetch(`/api/text/chat/sessions/${id(sessionId)}`),
+      'Failed to fetch chat session',
+    );
+    return data.session;
   },
 
   async createSession(request: CreateChatSessionRequest): Promise<ChatSession> {
-    const response = await apiFetch(`/api/text/chat/sessions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    });
-    const data: APIResponse<{ session: ChatSession }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to create chat session');
-    }
-    return data.data!.session;
+    const data = await parseApiResponse<{ session: ChatSession }>(
+      await apiFetch(`/api/text/chat/sessions`, jsonInit('POST', request)),
+      'Failed to create chat session',
+    );
+    return data.session;
   },
 
-  async updateSession(id: string, request: UpdateChatSessionRequest): Promise<ChatSession> {
-    const response = await apiFetch(`/api/text/chat/sessions/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    });
-    const data: APIResponse<{ session: ChatSession }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to update chat session');
-    }
-    return data.data!.session;
+  async updateSession(sessionId: string, request: UpdateChatSessionRequest): Promise<ChatSession> {
+    const data = await parseApiResponse<{ session: ChatSession }>(
+      await apiFetch(`/api/text/chat/sessions/${id(sessionId)}`, jsonInit('PUT', request)),
+      'Failed to update chat session',
+    );
+    return data.session;
   },
 
-  async deleteSession(id: string): Promise<void> {
-    const response = await apiFetch(`/api/text/chat/sessions/${id}`, {
-      method: 'DELETE',
-    });
-    const data: APIResponse<{ sessionId: string }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to delete chat session');
-    }
+  async deleteSession(sessionId: string): Promise<void> {
+    await parseApiResponse<{ sessionId: string }>(
+      await apiFetch(`/api/text/chat/sessions/${id(sessionId)}`, { method: 'DELETE' }),
+      'Failed to delete chat session',
+    );
   },
 
   async getMessages(sessionId: string): Promise<ChatMessage[]> {
-    const response = await apiFetch(`/api/text/chat/sessions/${sessionId}/messages`);
-    const data: APIResponse<{ messages: ChatMessage[] }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to fetch messages');
-    }
-    return data.data?.messages || [];
+    const data = await parseApiResponse<{ messages?: ChatMessage[] }>(
+      await apiFetch(`/api/text/chat/sessions/${id(sessionId)}/messages`),
+      'Failed to fetch messages',
+    );
+    return data?.messages || [];
   },
 
   async sendMessage(sessionId: string, request: SendMessageRequest): Promise<ChatMessage> {
-    const response = await apiFetch(`/api/text/chat/sessions/${sessionId}/messages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    });
-    const data: APIResponse<{ message: ChatMessage }> = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error?.message || 'Failed to send message');
-    }
-    return data.data!.message;
+    const data = await parseApiResponse<{ message: ChatMessage }>(
+      await apiFetch(`/api/text/chat/sessions/${id(sessionId)}/messages`, jsonInit('POST', request)),
+      'Failed to send message',
+    );
+    return data.message;
   },
 };
-

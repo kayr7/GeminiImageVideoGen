@@ -11,186 +11,143 @@ ModelInfoDict = Dict[str, Any]
 
 # Registry of all models understood by the backend. This mirrors the frontend constants so
 # configuration can expose the same options from a single source of truth.
+_RATIOS_10 = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"]
+_RATIOS_14 = [
+    "1:1", "1:4", "1:8", "2:3", "3:2", "3:4",
+    "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9",
+]
+_TTS_VOICES = [
+    "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe",
+    "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome",
+    "Algenib", "Rasalgethi", "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux",
+    "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager",
+    "Sulafat",
+]
+
+
+def _image(model_id, name, description, price, max_refs, ratios, *, modalities=("IMAGE",)):
+    return {
+        "id": model_id,
+        "name": name,
+        "description": description,
+        "price": price,
+        "priceUnit": "per image (1K)",
+        "tier": "paid",
+        "capabilities": {
+            "reference_images": {"enabled": True, "max": max_refs},
+            "sample_count": {"min": 1, "max": 1},
+            "aspect_ratios": list(ratios),
+            # generateContent response_modalities. The 3.x models often answer with
+            # text only (questions, greetings) when "TEXT" is allowed, so they are
+            # restricted to images; gemini-2.5-flash-image needs TEXT+IMAGE or it
+            # returns NO_IMAGE for ordinary prompts.
+            "response_modalities": list(modalities),
+        },
+    }
+
+
+# Gemini Omni Flash (Interactions API). Duration is sent as response_format.duration
+# ("<n>s"); the API accepts 3-10 s. Billing is per output token: 5,792 tokens per
+# second of 720p (~$0.10/s at $17.50 per 1M tokens); a 360p clip measured
+# ~1,930 tokens/s (~$0.034/s). 1080p/4k are upscaled from 720p.
+VIDEO_DURATIONS = [4, 6, 8, 10]
+VIDEO_DEFAULT_DURATION = 8
+VIDEO_MIN_DURATION = 3
+VIDEO_MAX_DURATION = 10
+
+
+def _video(model_id, name, description, price_per_second):
+    return {
+        "id": model_id,
+        "name": name,
+        "description": description,
+        "price": price_per_second,
+        "priceUnit": "per second (720p)",
+        "pricePerVideo": round(price_per_second * VIDEO_DEFAULT_DURATION, 2),
+        "tier": "paid",
+        "capabilities": {
+            "durations": list(VIDEO_DURATIONS),
+            "default_duration": VIDEO_DEFAULT_DURATION,
+            "resolutions": ["360p", "720p", "1080p", "4k"],
+            "default_resolution": "720p",
+            "aspect_ratios": ["16:9", "9:16"],
+            # Omni has no negative-prompt field; the backend appends "Avoid: ..." to
+            # the prompt instead (see routers/video.py).
+            "supports_negative_prompt": True,
+            "negative_prompt_mode": "prompt",
+            "video_reference_images": {
+                "enabled": True,
+                "max": 3,
+                "supports_start_frame": True,
+                "supports_end_frame": True,
+                "supports_reference_images": True,
+            },
+        },
+    }
+
+
+def _speech(model_id, name, description, price):
+    return {
+        "id": model_id,
+        "name": name,
+        "description": description,
+        "price": price,
+        "priceUnit": "per generation",
+        "tier": "paid",
+        "capabilities": {"voices": list(_TTS_VOICES)},
+    }
+
+
+def _text(model_id, name, description, price, supports_temperature=False):
+    return {
+        "id": model_id,
+        "name": name,
+        "description": description,
+        "price": price,
+        "priceUnit": "per 1M input tokens",
+        "tier": "paid",
+        "capabilities": {"supports_temperature": supports_temperature},
+    }
+
+
 _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
     "image": [
-        {
-            "id": "gemini-3.1-flash-image-preview",
-            "name": "Nano Banana 2 (Gemini 3.1 Flash)",
-            "description": "Best image generation & editing — pro-level quality at flash speed",
-            "price": 0.067,
-            "priceUnit": "per image",
-            "tier": "paid",
-            "capabilities": {
-                "reference_images": {"enabled": True, "max": 10},
-                "sample_count": {"min": 1, "max": 1},
-                "aspect_ratios": [
-                    "1:1", "1:4", "1:8", "2:3", "3:2", "3:4",
-                    "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9",
-                ],
-            },
-        },
-        {
-            "id": "gemini-2.5-flash-image",
-            "name": "Nano Banana (Gemini 2.5 Flash)",
-            "description": "Fast, conversational image generation",
-            "price": 0.0387,
-            "priceUnit": "per image",
-            "tier": "paid",
-            "capabilities": {
-                "reference_images": {"enabled": True, "max": 3},
-                "sample_count": {"min": 1, "max": 1},
-                "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
-            },
-        },
-        {
-            "id": "gemini-3-pro-image-preview",
-            "name": "Nano Banana Pro (Gemini 3 Pro)",
-            "description": "Professional asset production, complex instructions",
-            "price": 0.14,
-            "priceUnit": "per image",
-            "tier": "paid",
-            "capabilities": {
-                "reference_images": {"enabled": True, "max": 14},
-                "sample_count": {"min": 1, "max": 1},
-                "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
-            },
-        },
-        {
-            "id": "imagen-4.0-ultra-generate-001",
-            "name": "Imagen 4.0 Ultra",
-            "description": "Highest quality Imagen — best prompt alignment, up to 2K",
-            "price": 0.06,
-            "priceUnit": "per image",
-            "tier": "paid",
-            "capabilities": {
-                "reference_images": {"enabled": False, "max": 0},
-                "sample_count": {"min": 1, "max": 4},
-                "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
-            },
-        },
-        {
-            "id": "imagen-4.0-generate-001",
-            "name": "Imagen 4.0",
-            "description": "High quality text-to-image generation, up to 2K",
-            "price": 0.04,
-            "priceUnit": "per image",
-            "tier": "paid",
-            "capabilities": {
-                "reference_images": {"enabled": False, "max": 0},
-                "sample_count": {"min": 1, "max": 4},
-                "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
-            },
-        },
-        {
-            "id": "imagen-4.0-fast-generate-001",
-            "name": "Imagen 4.0 Fast",
-            "description": "Speed-optimized image generation — cheapest option",
-            "price": 0.02,
-            "priceUnit": "per image",
-            "tier": "paid",
-            "capabilities": {
-                "reference_images": {"enabled": False, "max": 0},
-                "sample_count": {"min": 1, "max": 4},
-                "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
-            },
-        },
+        _image("gemini-nano-banana-2.1", "Nano Banana 2.1",
+               "Newest image model — fast, high quality generation & editing, up to 4K",
+               0.0336, 14, _RATIOS_10),
+        _image("gemini-3.1-flash-image", "Nano Banana 2 (Gemini 3.1 Flash)",
+               "Pro-level quality at flash speed, extended aspect ratios",
+               0.067, 14, _RATIOS_14),
+        _image("gemini-3.1-flash-lite-image", "Nano Banana 2 Lite",
+               "Cheapest current image model — quick drafts (1K only)",
+               0.0336, 14, _RATIOS_10),
+        _image("gemini-3-pro-image", "Nano Banana Pro (Gemini 3 Pro)",
+               "Professional asset production, complex instructions",
+               0.14, 14, _RATIOS_10),
+        _image("gemini-2.5-flash-image", "Nano Banana (Gemini 2.5 Flash, legacy)",
+               "Legacy fast image generation",
+               0.0387, 3, ["1:1", "3:4", "4:3", "9:16", "16:9"],
+               modalities=("TEXT", "IMAGE")),
     ],
     "video": [
-        {
-            "id": "veo-3.1-generate-preview",
-            "name": "Veo 3.1",
-            "description": "High quality 8s video with audio",
-            "price": 0.40,
-            "priceUnit": "per second",
-            "pricePerVideo": 3.20,
-            "tier": "paid",
-            "capabilities": {
-                "durations": [4, 6, 8],
-                "resolutions": ["720p", "1080p"],
-                "aspect_ratios": ["16:9", "9:16"],
-                "video_reference_images": {
-                    "enabled": True,
-                    "max": 1,
-                    "supports_start_frame": True,
-                    "supports_end_frame": True,
-                },
-            },
-        },
-        {
-            "id": "veo-3.1-fast-generate-preview",
-            "name": "Veo 3.1 Fast",
-            "description": "Fast 8s video with audio",
-            "price": 0.15,
-            "priceUnit": "per second",
-            "pricePerVideo": 1.20,
-            "tier": "paid",
-            "capabilities": {
-                "durations": [4, 6, 8],
-                "resolutions": ["720p", "1080p"],
-                "aspect_ratios": ["16:9", "9:16"],
-                "video_reference_images": {
-                    "enabled": True,
-                    "max": 1,
-                    "supports_start_frame": True,
-                    "supports_end_frame": True,
-                },
-            },
-        },
-        {
-            "id": "veo-3.0-generate-001",
-            "name": "Veo 3.0 (Stable)",
-            "description": "Stable 8s video with audio",
-            "price": 0.40,
-            "priceUnit": "per second",
-            "pricePerVideo": 3.20,
-            "tier": "paid",
-            "capabilities": {
-                "durations": [4, 6, 8],
-                "resolutions": ["720p", "1080p"],
-                "aspect_ratios": ["16:9", "9:16"],
-                "video_reference_images": {
-                    "enabled": True,
-                    "max": 1,
-                    "supports_start_frame": True,
-                    "supports_end_frame": True,
-                },
-            },
-        },
-        {
-            "id": "veo-3.0-fast-generate-001",
-            "name": "Veo 3.0 Fast (Stable)",
-            "description": "Fast stable 8s video with audio",
-            "price": 0.15,
-            "priceUnit": "per second",
-            "pricePerVideo": 1.20,
-            "tier": "paid",
-            "capabilities": {
-                "durations": [4, 6, 8],
-                "resolutions": ["720p", "1080p"],
-                "aspect_ratios": ["16:9", "9:16"],
-                "video_reference_images": {
-                    "enabled": False,
-                    "max": 0,
-                    "supports_start_frame": False,
-                    "supports_end_frame": False,
-                },
-            },
-        },
+        _video("gemini-omni-1.1-flash", "Gemini Omni Flash",
+               "Text/image-to-video with audio, 3-10 s, up to 4K (upscaled)", 0.10),
     ],
     "speech": [
-        {
-            "id": "gemini-2.5-flash-preview-tts",
-            "name": "Gemini 2.5 Flash TTS",
-            "description": "Fast text-to-speech generation",
-            "price": 0.01,
-            "priceUnit": "per generation",
-            "tier": "paid",
-            "capabilities": {
-                "voices": [
-                    "Kore", "Puck", "Charon", "Aoede", "Fenrir"
-                ]
-            },
-        },
+        _speech("gemini-3.8-flash-tts", "Gemini 3.8 Flash TTS",
+                "Most expressive speech, multi-speaker dialogue", 0.005),
+        _speech("gemini-3.8-flash-lite-tts", "Gemini 3.8 Flash-Lite TTS",
+                "Cost-efficient text-to-speech", 0.003),
+    ],
+    "text": [
+        _text("gemini-3.8-flash", "Gemini 3.8 Flash",
+              "Newest Flash model — fast and capable", 0.75),
+        _text("gemini-3.6-flash", "Gemini 3.6 Flash",
+              "Previous-generation Flash model", 0.75),
+        _text("gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite",
+              "Cheapest 3.x model for simple tasks", 0.30),
+        _text("gemini-2.5-flash", "Gemini 2.5 Flash",
+              "Legacy Flash; thinking can be fully disabled", 0.30, supports_temperature=True),
     ],
 }
 
@@ -239,7 +196,10 @@ def _apply_model_overrides(
         enabled_ids = [
             model_id for model_id in admin_enabled if model_id in available_ids
         ]
-    else:
+        if admin_enabled and not enabled_ids:
+            # Stored list only references retired model ids: ignore it entirely.
+            admin_enabled = None
+    if admin_enabled is None:
         enabled_env = set(_parse_csv(os.getenv(f"ENABLED_{category.upper()}_MODELS")))
         disabled_env = set(_parse_csv(os.getenv(f"DISABLED_{category.upper()}_MODELS")))
 
@@ -247,6 +207,8 @@ def _apply_model_overrides(
             enabled_ids = [
                 model_id for model_id in available_ids if model_id in enabled_env
             ]
+            if not enabled_ids:  # only retired ids configured: ignore the allow-list
+                enabled_ids = available_ids.copy()
         else:
             enabled_ids = available_ids.copy()
 
@@ -366,12 +328,20 @@ def resolve_model_choice(category: str, requested_model: str | None) -> ModelInf
     """Return the enabled model info for ``category`` honouring overrides.
 
     The helper prefers the explicitly requested model when it is enabled. If no
-    model is provided (or the provided model is blank), the first enabled model
-    becomes the default. A ``LookupError`` is raised when the requested model is
+    model is provided (or the provided model is blank), the configured default
+    (admin/env override) is used, falling back to the first enabled model. A ``LookupError`` is raised when the requested model is
     disabled/unknown or the category has no enabled models.
     """
 
-    enabled_models = list_enabled_models(category)
+    category = category.lower()
+    if category not in _MODELS_BY_CATEGORY:
+        raise LookupError(f"No enabled models configured for category '{category}'.")
+    admin_settings = get_admin_model_settings()
+    overrides = (
+        admin_settings.get(category, {}) if isinstance(admin_settings, dict) else {}
+    )
+    availability = _apply_model_overrides(category, _MODELS_BY_CATEGORY[category], overrides)
+    enabled_models = availability["enabled"]
     if not enabled_models:
         raise LookupError(f"No enabled models configured for category '{category}'.")
 
@@ -385,6 +355,10 @@ def resolve_model_choice(category: str, requested_model: str | None) -> ModelInf
             f"Model '{requested}' is disabled or unavailable for category '{category}'."
         )
 
+    default_id = availability.get("default")
+    for model in enabled_models:
+        if model["id"] == default_id:
+            return model
     return enabled_models[0]
 
 

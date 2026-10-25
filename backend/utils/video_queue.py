@@ -2,10 +2,31 @@
 
 import json
 import uuid
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta
+from typing import Any, Dict, Iterable, List, Optional
 
+from utils import media_inputs
 from utils.database import get_connection, initialize_database
+
+
+# API field name -> column. Video bytes are intentionally NOT persisted here:
+# the finished video lives in the media store and jobs only reference its mediaId.
+_UPDATABLE_COLUMNS = {
+    "status": "status",
+    "prompt": "prompt",
+    "model": "model",
+    "mode": "mode",
+    "error": "error",
+    "mediaId": "media_id",
+    "operationId": "operation_id",
+}
+
+
+# Explicit column list: legacy rows may hold huge video_url/video_data blobs that are never read.
+_JOB_COLUMNS = (
+    "id, job_id, operation_id, user_id, prompt, model, mode, status, progress, error, "
+    "details, media_id, ip_address, created_at, updated_at, completed_at"
+)
 
 
 class VideoQueue:
@@ -34,9 +55,8 @@ class VideoQueue:
             "progress": row["progress"],
             "error": row["error"],
             "details": details,
-            "videoUrl": row["video_url"],
-            "videoData": row["video_data"],
             "mediaId": row["media_id"],
+            "ipAddress": row["ip_address"],
             "createdAt": datetime.fromisoformat(row["created_at"]),
             "updatedAt": datetime.fromisoformat(row["updated_at"]),
         }
@@ -62,9 +82,9 @@ class VideoQueue:
                 """
                 INSERT OR REPLACE INTO video_jobs (
                     id, job_id, operation_id, user_id, prompt, model, mode,
-                    status, progress, error, details, video_url, video_data,
-                    media_id, created_at, updated_at, completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    status, progress, error, details,
+                    media_id, ip_address, created_at, updated_at, completed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     internal_id,
@@ -72,15 +92,14 @@ class VideoQueue:
                     operation_id,
                     data.get("userId", "anonymous"),
                     data.get("prompt", ""),
-                    data.get("model", "veo-3.1-fast-generate-preview"),
+                    data.get("model", "gemini-omni-1.1-flash"),
                     data.get("mode", "text"),
                     data.get("status", "pending"),
                     int(data.get("progress", 0)),
                     data.get("error"),
                     details_json,
-                    data.get("videoUrl"),
-                    data.get("videoData"),
                     data.get("mediaId"),
+                    data.get("ipAddress"),
                     now,
                     now,
                     None,
@@ -89,7 +108,7 @@ class VideoQueue:
             conn.commit()
 
             row = conn.execute(
-                "SELECT * FROM video_jobs WHERE id = ?",
+                f"SELECT {_JOB_COLUMNS} FROM video_jobs WHERE id = ?",
                 (internal_id,),
             ).fetchone()
 
@@ -108,18 +127,8 @@ class VideoQueue:
             if key == "details":
                 fields.append("details = ?")
                 values.append(json.dumps(value) if value is not None else None)
-            elif key in {"status", "prompt", "model", "mode", "error", "videoUrl", "videoData", "mediaId"}:
-                column = {
-                    "status": "status",
-                    "prompt": "prompt",
-                    "model": "model",
-                    "mode": "mode",
-                    "error": "error",
-                    "videoUrl": "video_url",
-                    "videoData": "video_data",
-                    "mediaId": "media_id",
-                }[key]
-                fields.append(f"{column} = ?")
+            elif key in _UPDATABLE_COLUMNS:
+                fields.append(f"{_UPDATABLE_COLUMNS[key]} = ?")
                 values.append(value)
             elif key == "progress":
                 fields.append("progress = ?")
@@ -138,6 +147,13 @@ class VideoQueue:
             fields.append("completed_at = ?")
             values.append(None)
 
+        # Input images are only needed until the job is finished: drop them from the row.
+        if "details" not in updates and updates.get("status") in ("completed", "failed"):
+            current = self.get_job(internal_id)
+            if current and media_inputs.has_inline_inputs(current.get("details")):
+                fields.append("details = ?")
+                values.append(json.dumps(media_inputs.strip_inline_inputs(current["details"])))
+
         values.append(internal_id)
 
         query = f"UPDATE video_jobs SET {', '.join(fields)} WHERE id = ?"
@@ -146,7 +162,7 @@ class VideoQueue:
             conn.execute(query, values)
             conn.commit()
             row = conn.execute(
-                "SELECT * FROM video_jobs WHERE id = ?",
+                f"SELECT {_JOB_COLUMNS} FROM video_jobs WHERE id = ?",
                 (internal_id,),
             ).fetchone()
 
@@ -160,23 +176,22 @@ class VideoQueue:
 
         with get_connection() as conn:
             row = conn.execute(
-                "SELECT * FROM video_jobs WHERE id = ?",
+                f"SELECT {_JOB_COLUMNS} FROM video_jobs WHERE id = ?",
                 (internal_id,),
             ).fetchone()
 
         return self._row_to_job(row) if row else None
 
     def list_jobs(self, user_id: str) -> List[Dict[str, Any]]:
-        """List all jobs for a user ordered by creation time."""
+        """List all jobs for a user, newest first (timestamps as ISO strings)."""
         with get_connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM video_jobs WHERE user_id = ? ORDER BY datetime(created_at) DESC",
+                f"SELECT {_JOB_COLUMNS} FROM video_jobs WHERE user_id = ? ORDER BY datetime(created_at) DESC",
                 (user_id,),
             ).fetchall()
 
         jobs = [self._row_to_job(row) for row in rows]
 
-        # Convert datetimes to ISO strings for API responses
         for job in jobs:
             job["createdAt"] = job["createdAt"].isoformat()
             job["updatedAt"] = job["updatedAt"].isoformat()
@@ -184,6 +199,46 @@ class VideoQueue:
                 job["completedAt"] = job["completedAt"].isoformat()
 
         return jobs
+
+    def fail_unresumable_jobs(
+        self,
+        known_models: Iterable[str],
+        max_age: timedelta = timedelta(hours=1),
+    ) -> int:
+        """Mark unfinished jobs that can never complete as failed (run at startup).
+
+        A job is unresumable when its model is no longer in the registry (e.g. the
+        retired Veo models), when it has no remote interaction id to poll, or when
+        it has been unfinished for longer than ``max_age``.
+        """
+        known = set(known_models)
+        cutoff = datetime.now() - max_age
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT id, model, operation_id, created_at FROM video_jobs "
+                "WHERE status IN ('processing', 'pending')"
+            ).fetchall()
+
+        failed = 0
+        for row in rows:
+            try:
+                created = datetime.fromisoformat(row["created_at"])
+            except (TypeError, ValueError):
+                created = datetime.min
+            if row["model"] not in known:
+                reason = (
+                    f"Video model '{row['model']}' is no longer available; "
+                    "the job could not be completed. Please start a new video."
+                )
+            elif not row["operation_id"]:
+                reason = "The job was interrupted by a server restart. Please start a new video."
+            elif created < cutoff:
+                reason = "The job did not finish in time and was abandoned. Please start a new video."
+            else:
+                continue
+            self.update_job(row["id"], {"status": "failed", "error": reason})
+            failed += 1
+        return failed
 
     def _resolve_job_id(self, job_id: str) -> Optional[str]:
         """Resolve external identifiers (operation name) to the stored job ID."""

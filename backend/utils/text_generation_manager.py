@@ -3,23 +3,14 @@
 from __future__ import annotations
 
 import json
-import os
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from google import genai
 from google.genai import types
 
 from utils.database import get_connection
-
-# Configure Gemini API - lazy client initialization
-def get_client():
-    """Get or create the Gemini client."""
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable is required")
-    return genai.Client(api_key=api_key)
+from utils.gemini import get_client
 
 
 class TextGeneration:
@@ -85,7 +76,7 @@ class TextGenerationManager:
         system_prompt_id: Optional[str] = None,
         template_id: Optional[str] = None,
         variable_values: Optional[Dict[str, str]] = None,
-        model: str = "gemini-2.5-flash",
+        model: str = "gemini-3.8-flash",
         ip_address: Optional[str] = None,
     ) -> TextGeneration:
         """Generate text using Gemini API (single-turn)."""

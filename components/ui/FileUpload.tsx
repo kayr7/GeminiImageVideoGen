@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, ChangeEvent, DragEvent, useEffect } from 'react';
+import { readFileAsDataUrl, stripDataUrlPrefix } from '@/lib/utils/files';
 
 interface FileUploadProps {
   accept?: string;
@@ -55,23 +56,16 @@ export default function FileUpload({
 
     setFileName(file.name);
 
-    // Generate preview for images
-    if (preview && file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setPreviewUrl(e.target?.result as string);
-      };
-      reader.readAsDataURL(file);
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      if (preview && file.type.startsWith('image/')) {
+        setPreviewUrl(dataUrl);
+      }
+      // Remove data URL prefix for upload
+      onFileSelect(file, stripDataUrlPrefix(dataUrl));
+    } catch {
+      onFileSelect(null);
     }
-
-    // Convert to base64 for upload
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target?.result as string;
-      const base64 = result.split(',')[1]; // Remove data URL prefix
-      onFileSelect(file, base64);
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleChange = (e: ChangeEvent<HTMLInputElement>) => {

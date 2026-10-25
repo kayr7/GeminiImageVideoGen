@@ -34,8 +34,15 @@ def _load_raw_config() -> Dict[str, Any]:
 
 def _write_raw_config(payload: Dict[str, Any]) -> None:
     _ensure_directory(_CONFIG_PATH)
-    with _CONFIG_PATH.open("w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2, sort_keys=True)
+    tmp_path = _CONFIG_PATH.with_name(f"{_CONFIG_PATH.name}.{os.getpid()}.tmp")
+    try:
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, _CONFIG_PATH)
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def get_admin_model_settings() -> Dict[str, Any]:
@@ -61,7 +68,32 @@ def remove_admin_model_settings(category: str) -> None:
         _write_raw_config(payload)
 
 
+def get_admin_section(name: str) -> Dict[str, Any]:
+    """Return a copy of a top-level generic settings section (e.g. "promptLab")."""
+    section = _load_raw_config().get(name)
+    return dict(section) if isinstance(section, dict) else {}
+
+
+def store_admin_section(name: str, values: Dict[str, Any]) -> Dict[str, Any]:
+    """Atomically persist a generic top-level settings section."""
+    payload = _load_raw_config()
+    payload[name] = values
+    _write_raw_config(payload)
+    return values
+
+
+def admin_config_mtime() -> float:
+    """mtime of the config file (0.0 if missing) for cheap cache invalidation."""
+    try:
+        return _CONFIG_PATH.stat().st_mtime_ns
+    except OSError:
+        return 0.0
+
+
 __all__ = [
+    "get_admin_section",
+    "store_admin_section",
+    "admin_config_mtime",
     "get_admin_model_settings",
     "store_admin_model_settings",
     "remove_admin_model_settings",

@@ -66,8 +66,6 @@ let resolvedBase: string | null = null;
 
 const shouldRetry = (status: number): boolean => RETRYABLE_STATUSES.has(status);
 
-export const getApiBaseCandidates = (): readonly string[] => baseCandidates;
-
 export const resolveApiUrl = (path: string): string => {
   if (hasUrlScheme(path)) {
     return path;
@@ -78,6 +76,25 @@ export const resolveApiUrl = (path: string): string => {
 };
 
 const STORAGE_KEY = 'gemini-auth-session';
+
+/**
+ * Dispatched on `window` when a request that carried a session token is answered
+ * with 401 (expired or revoked session). AuthContext listens and logs the user out.
+ */
+export const AUTH_EXPIRED_EVENT = 'auth:expired';
+
+const isCredentialEndpoint = (path: string): boolean =>
+  path.includes('/auth/login') || path.includes('/auth/set-password');
+
+// 401 from these means "wrong current password", not an expired session.
+const isPasswordCheckEndpoint = (path: string): boolean => path.includes('/auth/change-password');
+
+const notifyAuthExpired = (path: string) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, { detail: { path } }));
+};
 
 const getAuthToken = (): string | null => {
   if (typeof window === 'undefined') {
@@ -105,8 +122,9 @@ export const apiFetch = async (path: string, init?: RequestInit): Promise<Respon
   // Get auth token and add to headers
   const token = getAuthToken();
   const headers = new Headers(init?.headers);
-  
-  if (token && !path.includes('/auth/login') && !path.includes('/auth/set-password')) {
+  const sendsToken = !!token && !isCredentialEndpoint(path);
+
+  if (sendsToken) {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
@@ -135,6 +153,9 @@ export const apiFetch = async (path: string, init?: RequestInit): Promise<Respon
   }
 
   if (lastResponse) {
+    if (lastResponse.status === 401 && sendsToken && !isPasswordCheckEndpoint(targetPath)) {
+      notifyAuthExpired(targetPath);
+    }
     return lastResponse;
   }
 

@@ -3,8 +3,8 @@ describe('resolveApiUrl', () => {
 
   const loadModule = async () => {
     jest.resetModules();
-    const module = await import('@/lib/utils/apiClient');
-    return module;
+    const apiClientModule = await import('@/lib/utils/apiClient');
+    return apiClientModule;
   };
 
   afterEach(() => {

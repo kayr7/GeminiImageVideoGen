@@ -1,16 +1,22 @@
 """Media storage system for saving images and videos to disk."""
 
 import base64
+import logging
 import json
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from utils import media_inputs
 from utils.database import get_connection, initialize_database
 
+logger = logging.getLogger(__name__)
+
 # Storage configuration
-STORAGE_ROOT = Path(__file__).parent.parent / ".media-storage"
+# MEDIA_STORAGE_DIR overrides the default location (read at import time).
+STORAGE_ROOT = Path(os.environ.get("MEDIA_STORAGE_DIR") or Path(__file__).parent.parent / ".media-storage")
 VIDEOS_DIR = STORAGE_ROOT / "videos"
 IMAGES_DIR = STORAGE_ROOT / "images"
 AUDIO_DIR = STORAGE_ROOT / "audio"
@@ -26,8 +32,20 @@ class MediaStorage:
 
     def _ensure_directories(self) -> None:
         """Create storage directories if they don't exist."""
-        for directory in (STORAGE_ROOT, VIDEOS_DIR, IMAGES_DIR, AUDIO_DIR, THUMBNAILS_DIR):
+        for directory in (
+            STORAGE_ROOT, VIDEOS_DIR, IMAGES_DIR, AUDIO_DIR, THUMBNAILS_DIR,
+            media_inputs.originals_dir(STORAGE_ROOT),
+        ):
             directory.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def file_path_for(media_type: str, filename: str) -> Path:
+        """Location of a media file (reads the module paths at call time)."""
+        if media_type == "video":
+            return VIDEOS_DIR / filename
+        if media_type == "audio":
+            return AUDIO_DIR / filename
+        return IMAGES_DIR / filename
 
     def _row_to_metadata(self, row) -> Dict[str, Any]:
         details: Optional[Dict[str, Any]] = None
@@ -86,6 +104,9 @@ class MediaStorage:
         file_bytes = base64.b64decode(base64_data)
         file_path.write_bytes(file_bytes)
 
+        # Input images go to files; only names are kept in the DB row.
+        details = media_inputs.extract_inputs(media_id, metadata.get("details"), STORAGE_ROOT)
+
         # Save metadata with IP address for abuse tracking
         media_metadata = {
             "id": media_id,
@@ -97,7 +118,7 @@ class MediaStorage:
             "createdAt": datetime.now(),
             "fileSize": len(file_bytes),
             "mimeType": metadata.get("mimeType", default_mime),
-            "details": metadata.get("details"),
+            "details": details,
             "ipAddress": metadata.get("ipAddress"),  # Track IP for abuse prevention
         }
 
@@ -129,9 +150,7 @@ class MediaStorage:
             )
             conn.commit()
 
-        print(
-            f"Saved {media_type} to disk: {filename} ({len(file_bytes) / 1024 / 1024:.2f} MB)"
-        )
+        logger.info("Saved %s to disk: %s (%.2f MB)", media_type, filename, len(file_bytes) / 1024 / 1024)
 
         return media_id
 
@@ -142,8 +161,8 @@ class MediaStorage:
             file_bytes = base64.b64decode(base64_data)
             thumbnail_path.write_bytes(file_bytes)
             return True
-        except Exception as e:
-            print(f"Failed to save thumbnail: {e}")
+        except Exception:
+            logger.exception("Failed to save thumbnail for %s", media_id)
             return False
 
     def get_media(self, media_id: str) -> dict:
@@ -159,22 +178,108 @@ class MediaStorage:
 
         media_meta = self._row_to_metadata(row)
 
-        # Determine file path
-        if media_meta["type"] == "video":
-            file_path = VIDEOS_DIR / media_meta["filename"]
-        elif media_meta["type"] == "audio":
-            file_path = AUDIO_DIR / media_meta["filename"]
-        else:
-            file_path = IMAGES_DIR / media_meta["filename"]
+        file_path = self.file_path_for(media_meta["type"], media_meta["filename"])
 
         if not file_path.exists():
-            print(f"Media file not found: {file_path}")
+            logger.warning("Media file not found: %s", file_path)
             return None
 
         # Read file
         file_bytes = file_path.read_bytes()
 
         return {"data": file_bytes, "metadata": media_meta}
+
+    def get_media_metadata(self, media_id: str) -> Optional[Dict[str, Any]]:
+        """Cheap lookup (no details blob, no file read): id, type, filename, userId, mimeType, fileSize."""
+        with get_connection() as conn:
+            row = conn.execute(
+                "SELECT id, type, filename, user_id, mime_type, file_size FROM media WHERE id = ?",
+                (media_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "type": row["type"],
+            "filename": row["filename"],
+            "userId": row["user_id"],
+            "mimeType": row["mime_type"],
+            "fileSize": row["file_size"],
+        }
+
+    def get_media_details(self, media_id: str) -> Optional[Dict[str, Any]]:
+        """Parsed details JSON of one media row (may be large for legacy rows)."""
+        with get_connection() as conn:
+            row = conn.execute("SELECT details FROM media WHERE id = ?", (media_id,)).fetchone()
+        if not row or not row["details"]:
+            return None
+        try:
+            parsed = json.loads(row["details"])
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def list_media_summaries(
+        self,
+        *,
+        user_id: Optional[str] = None,
+        admin_id: Optional[str] = None,
+        media_type: Optional[str] = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> tuple[List[Dict[str, Any]], int]:
+        """Page of slim media rows plus total count, newest first.
+
+        Either ``user_id`` (that user's media) or ``admin_id`` (the admin's own media plus
+        media of users they manage). No details blob is loaded: SQLite JSON functions
+        extract only mode, negativePrompt and the number of input images.
+        """
+        if admin_id is not None:
+            # Media of deleted users (kept on purpose) stays visible to every admin.
+            where = (
+                "(user_id = ? OR user_id IN (SELECT user_id FROM user_admins WHERE admin_id = ?)"
+                " OR user_id NOT IN (SELECT id FROM users))"
+            )
+            params: List[Any] = [admin_id, admin_id]
+        else:
+            where = "user_id = ?"
+            params = [user_id]
+        if media_type:
+            where += " AND type = ?"
+            params.append(media_type)
+
+        def count(path: str) -> str:
+            return (
+                f"COALESCE(json_array_length(m.details, '$.inputs.{path}'),"
+                f" json_array_length(m.details, '$.{path}'), 0)"
+            )
+
+        def has(path: str) -> str:
+            return (
+                f"(COALESCE(json_type(m.details, '$.inputs.{path}'), '') = 'text'"
+                f" OR COALESCE(json_type(m.details, '$.{path}'), '') = 'text')"
+            )
+
+        query = f"""
+            SELECT m.id, m.type, m.prompt, m.model, m.user_id, m.created_at,
+                   m.file_size, m.mime_type, m.ip_address, u.email AS user_email,
+                   json_extract(m.details, '$.mode') AS mode,
+                   json_extract(m.details, '$.negativePrompt') AS negative_prompt,
+                   {count('referenceImages')} AS reference_count,
+                   {count('sourceImages')} AS source_count,
+                   {has('firstFrame')} AS has_first,
+                   {has('lastFrame')} AS has_last
+            FROM (SELECT id FROM media WHERE {where}
+                  ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?) p
+            JOIN media m ON m.id = p.id
+            LEFT JOIN users u ON u.id = m.user_id
+            ORDER BY m.created_at DESC, m.id DESC
+        """
+        with get_connection() as conn:
+            total = conn.execute(f"SELECT COUNT(*) FROM media WHERE {where}", params).fetchone()[0]
+            rows = conn.execute(query, [*params, limit, offset]).fetchall()
+
+        return [dict(row) for row in rows], total
 
     def list_user_media(
         self,
@@ -213,7 +318,7 @@ class MediaStorage:
             return conn.execute(query, params).fetchone()[0]
 
     def delete_media(self, media_id: str) -> bool:
-        """Delete media file and metadata by ID"""
+        """Delete media file, thumbnail, input files and metadata by ID"""
         with get_connection() as conn:
             row = conn.execute(
                 "SELECT * FROM media WHERE id = ?",
@@ -223,26 +328,43 @@ class MediaStorage:
         if not row:
             return False
 
-        media_meta = self._row_to_metadata(row)
-
-        if media_meta["type"] == "video":
-            file_path = VIDEOS_DIR / media_meta["filename"]
-        elif media_meta["type"] == "audio":
-            file_path = AUDIO_DIR / media_meta["filename"]
-        else:
-            file_path = IMAGES_DIR / media_meta["filename"]
+        file_path = self.file_path_for(row["type"], row["filename"])
 
         try:
             if file_path.exists():
                 file_path.unlink()
-        except Exception as e:
-            print(f"Error deleting media file {file_path}: {e}")
+        except Exception:
+            logger.exception("Error deleting media file %s", file_path)
             raise
 
         with get_connection() as conn:
             conn.execute("DELETE FROM media WHERE id = ?", (media_id,))
             conn.commit()
+
+        self._delete_aux_files(media_id)
         return True
+
+    def remove_media_files(self, media_id: str, media_type: str, filename: str) -> None:
+        """Remove the file, thumbnail and input files of a media item (DB row untouched)."""
+        self.file_path_for(media_type, filename).unlink(missing_ok=True)
+        self._delete_aux_files(media_id)
+
+    @staticmethod
+    def _delete_aux_files(media_id: str) -> None:
+        try:
+            (THUMBNAILS_DIR / f"{media_id}.jpg").unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Failed to delete thumbnail for %s", media_id, exc_info=True)
+        MediaStorage._delete_input_files(media_id)
+
+    @staticmethod
+    def _delete_input_files(media_id: str) -> None:
+        for directory in (media_inputs.originals_dir(STORAGE_ROOT), media_inputs.previews_dir(STORAGE_ROOT)):
+            try:
+                for path in directory.glob(f"{media_id}_*"):
+                    path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Failed to delete input files for %s", media_id, exc_info=True)
 
     def get_stats(self) -> dict:
         """Get storage statistics"""

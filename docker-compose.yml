@@ -16,11 +16,12 @@ services:
       - ./backend/.media-storage:/app/.media-storage
       - ./backend/.video-jobs:/app/.video-jobs
       - ./backend/.data:/app/.data  # SQLite database persistence
+      - ./backend/data:/app/data  # admin model config (admin-config.json)
     restart: unless-stopped
     networks:
       - app-network
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/HdMImageVideo/health || exit 1"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/HdMImageVideo/health', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3

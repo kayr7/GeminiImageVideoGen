@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Iterable
 
-DB_DIR = Path(__file__).parent.parent / ".data"
+# DATA_DIR overrides the default location (read at import time).
+DB_DIR = Path(os.environ.get("DATA_DIR") or Path(__file__).parent.parent / ".data")
 DB_FILE = DB_DIR / "app.db"
 
 MIGRATIONS: list[tuple[int, Iterable[str]]] = [
@@ -409,6 +411,41 @@ MIGRATIONS: list[tuple[int, Iterable[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_media_user_created_at ON media(user_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_media_type_created_at ON media(type, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_media_ip_address ON media(ip_address, created_at DESC)",
+        ),
+    ),
+    (
+        10,
+        (
+            """
+            CREATE TABLE IF NOT EXISTS prompt_lab_usage (
+                date TEXT PRIMARY KEY,
+                requests INTEGER NOT NULL DEFAULT 0,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                thoughts_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                errors INTEGER NOT NULL DEFAULT 0,
+                rejected INTEGER NOT NULL DEFAULT 0
+            )
+            """,
+        ),
+    ),
+    (
+        11,
+        (
+            """
+            CREATE TABLE IF NOT EXISTS user_placeholders (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                value TEXT NOT NULL,
+                description TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE(user_id, name)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_user_placeholders_user_id ON user_placeholders(user_id)",
         ),
     ),
 ]

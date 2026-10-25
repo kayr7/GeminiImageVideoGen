@@ -134,6 +134,22 @@ class QuotaManager:
             )
 
     @staticmethod
+    def get_or_create_quota(user_id: str, generation_type: str) -> Optional[Quota]:
+        """Get a quota, creating the default one if the user has none yet.
+
+        Accounts created before a generation type existed (or bulk-created with
+        only some types) have no row for it; treat that as "default quota", not
+        as "denied". An explicit limit of 0 is how admins deny a type.
+        """
+        quota = QuotaManager.get_quota(user_id, generation_type)
+        if quota or generation_type not in QuotaManager.DEFAULT_QUOTAS:
+            return quota
+        default = QuotaManager.DEFAULT_QUOTAS[generation_type]
+        return QuotaManager.create_quota(
+            user_id, generation_type, default["type"], default["limit"]
+        )
+
+    @staticmethod
     def get_all_quotas(user_id: str) -> List[Quota]:
         """Get all quotas for a user."""
         with get_connection() as conn:
@@ -164,10 +180,10 @@ class QuotaManager:
         Returns:
             (has_quota, error_message)
         """
-        quota = QuotaManager.get_quota(user_id, generation_type)
+        quota = QuotaManager.get_or_create_quota(user_id, generation_type)
 
         if not quota:
-            # No quota set, deny by default
+            # Unknown generation type
             return False, "No quota configured for this generation type"
 
         # Unlimited quota
@@ -224,7 +240,7 @@ class QuotaManager:
         quota_limit: Optional[int] = None,
     ) -> Optional[Quota]:
         """Update a quota."""
-        quota = QuotaManager.get_quota(user_id, generation_type)
+        quota = QuotaManager.get_or_create_quota(user_id, generation_type)
 
         if not quota:
             return None

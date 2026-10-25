@@ -1,649 +1,706 @@
 """
-Video generation endpoints using Google Gemini Python SDK with Veo
-Documentation: https://ai.google.dev/gemini-api/docs/video
+Video generation endpoints using Gemini Omni Flash via the Interactions API.
+Documentation: https://ai.google.dev/gemini-api/docs/omni
+
+Jobs run in Omni's background mode: POST /generate (or /animate) creates a
+stored background interaction and records its id in ``operation_id``; GET
+/status polls ``interactions.get`` under a per-job lock and, once the video is
+ready, stores it exactly once (media + thumbnail + quota).
+
+Finished videos are stored in the media store (see utils/media_storage.py); the
+video_jobs table only keeps the job state and the resulting ``mediaId``. The
+/status and /jobs/{id} endpoints still return the video as a ``data:`` URL
+because the frontend feeds it straight into ``<video src>``, which cannot send
+the Bearer header required by GET /api/media/{id}.
 """
 
-from fastapi import APIRouter, HTTPException, Query, Request, Depends
-from google import genai
-from google.genai import types
-import os
-import time
 import base64
+import binascii
+import logging
+import threading
+import time
+import uuid
+from collections import defaultdict
 from datetime import datetime
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 
 from models import (
-    VideoGenerationRequest,
-    VideoAnimateRequest,
-    VideoResponse,
-    SuccessResponse,
     LoginUser,
+    SuccessResponse,
+    VideoAnimateRequest,
+    VideoGenerationRequest,
 )
-from utils.config import resolve_model_choice
-from utils.media_storage import get_media_storage
-from utils.video_queue import get_video_queue
-from utils.rate_limiter import check_rate_limit
 from utils.auth import get_current_user_with_db
-from utils.user_manager import User
+from utils.config import (
+    VIDEO_DEFAULT_DURATION,
+    VIDEO_MAX_DURATION,
+    VIDEO_MIN_DURATION,
+    get_model_registry,
+    resolve_model_choice,
+)
+from utils.gemini import get_client_ip, get_video_client, split_data_url, to_base64
+from utils.media_storage import get_media_storage
 from utils.quota_manager import QuotaManager
+from utils.rate_limiter import check_rate_limit
+from utils.user_manager import User
 from utils.video_frame_extractor import extract_frames
+from utils.video_queue import get_video_queue
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+AuthTuple = Tuple[LoginUser, User]
 
-def get_client():
-    """Get authenticated Gemini client"""
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
-    return genai.Client(api_key=api_key)
+MAX_REFERENCE_IMAGES = 3
+CREATE_TIMEOUT_SECONDS = 120  # background create returns in ~2 s
+GET_TIMEOUT_SECONDS = 300  # a finished interaction carries the video inline (base64)
+_PENDING_STATUSES = {"in_progress", "queued"}
 
-
-def get_client_ip(request: Request) -> str:
-    """
-    Extract client IP address from request for abuse tracking.
-    Handles X-Forwarded-For and X-Real-IP headers for proxy scenarios.
-    """
-    # Check X-Forwarded-For header (comma-separated list, first is client)
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-
-    # Check X-Real-IP header
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip.strip()
-
-    # Fallback to direct client IP
-    if request.client and request.client.host:
-        return request.client.host
-
-    return "unknown"
+# One lock per job id so concurrent polls (e.g. two tabs) finalise a job only once.
+_finalize_locks: Dict[str, threading.Lock] = defaultdict(threading.Lock)
+_finalize_locks_guard = threading.Lock()
 
 
-def extract_base64_bytes(image_data: str) -> tuple[bytes, str]:
-    """Extract base64 data from data URL and convert to bytes, also return mime type"""
-    # Extract mime type from data URL if present
-    mime_type = "image/png"  # Default
+def _job_lock(job_id: str) -> threading.Lock:
+    with _finalize_locks_guard:
+        return _finalize_locks[job_id]
 
-    if "," in image_data:
-        # Format: data:image/png;base64,<base64_string>
-        header, base64_str = image_data.split(",", 1)
-        if ":" in header and ";" in header:
-            mime_type = header.split(":")[1].split(";")[0]
+
+# ---------------------------------------------------------------------------
+# Request validation / Omni input building
+# ---------------------------------------------------------------------------
+
+
+def _resolve_video_model(requested: Optional[str]) -> Dict[str, Any]:
+    try:
+        return resolve_model_choice("video", requested)
+    except LookupError as error:
+        status_code = 400 if (requested or "").strip() else 503
+        raise HTTPException(status_code=status_code, detail=str(error))
+
+
+def _require_frame_support(model_info: Dict[str, Any], feature: str) -> None:
+    """Reject first/last frame or reference-image input the chosen model does not support."""
+    ref_config = model_info.get("capabilities", {}).get("video_reference_images", {})
+    if feature.lower().startswith("reference"):
+        supported = ref_config.get("supports_reference_images", ref_config.get("enabled", False))
+    elif feature.lower().startswith("last"):
+        supported = ref_config.get("supports_end_frame", ref_config.get("enabled", False))
     else:
-        base64_str = image_data
+        supported = ref_config.get("supports_start_frame", ref_config.get("enabled", False))
+    if not supported:
+        raise HTTPException(
+            status_code=400, detail=f"{feature} is not supported by {model_info['id']}."
+        )
 
-    # Decode base64 string to bytes
-    image_bytes = base64.b64decode(base64_str)
-    return image_bytes, mime_type
+
+def _choice(value: Optional[str], allowed: List[str], default: str, label: str, model_id: str) -> str:
+    value = (value or "").strip() or default
+    if allowed and value not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label} '{value}' is not supported by {model_id}. "
+            f"Supported: {', '.join(allowed)}.",
+        )
+    return value
 
 
-def create_image_from_bytes(
-    image_bytes: bytes, mime_type: str = "image/png"
-) -> types.Image:
-    """Create a types.Image object from bytes with mime type"""
-    return types.Image(imageBytes=image_bytes, mimeType=mime_type)
+def _duration(value: Any, capabilities: Dict[str, Any], model_id: str) -> int:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return int(capabilities.get("default_duration") or VIDEO_DEFAULT_DURATION)
+    try:
+        seconds = int(str(value).strip().rstrip("sS"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid duration '{value}'.")
+    if not VIDEO_MIN_DURATION <= seconds <= VIDEO_MAX_DURATION:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Duration {seconds}s is not supported by {model_id}. "
+            f"Choose {VIDEO_MIN_DURATION}-{VIDEO_MAX_DURATION} seconds.",
+        )
+    return seconds
+
+
+def _output_options(req: Any, model_info: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate aspect ratio / resolution / duration against the model capabilities."""
+    caps = model_info.get("capabilities", {})
+    model_id = model_info["id"]
+    return {
+        "aspectRatio": _choice(
+            req.aspectRatio, caps.get("aspect_ratios", []), "16:9", "Aspect ratio", model_id
+        ),
+        "resolution": _choice(
+            req.resolution, caps.get("resolutions", []),
+            caps.get("default_resolution", "720p"), "Resolution", model_id,
+        ),
+        "durationSeconds": _duration(req.durationSeconds, caps, model_id),
+    }
+
+
+def _image_item(data_url: str) -> Dict[str, str]:
+    """Interactions API image input from a data URL / base64 string (validated)."""
+    payload, mime_type = split_data_url(data_url)
+    try:
+        base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise HTTPException(status_code=400, detail=f"Invalid image data: {error}")
+    return {"type": "image", "data": payload, "mime_type": mime_type}
+
+
+def _image_roles_hint(first: bool, last: bool, ref_count: int) -> str:
+    """Spell out what each attached image is for (Omni infers roles from the prompt)."""
+    roles: List[str] = []
+    index = 1
+    if first:
+        roles.append(f"image {index} is the first frame of the video")
+        index += 1
+    if last:
+        roles.append(f"image {index} is the last frame of the video")
+        index += 1
+    if ref_count:
+        span = f"image {index}" if ref_count == 1 else f"images {index}-{index + ref_count - 1}"
+        roles.append(
+            f"{span} {'is a reference' if ref_count == 1 else 'are references'} for "
+            "subjects, characters and style (not frames)"
+        )
+    if not roles:
+        return ""
+    hint = "Input images: " + "; ".join(roles) + "."
+    if first and last:
+        hint += " Animate a smooth transition from the first to the last frame."
+    return hint
+
+
+def _video_mode(first: bool, last: bool, ref_count: int) -> str:
+    if not (first or last or ref_count):
+        return "text-to-video"
+    if ref_count and not (first or last):
+        return "reference-to-video"
+    if first and last:
+        return "first-last-frame"
+    return "image-to-video"
+
+
+def _build_input(
+    prompt: str,
+    negative_prompt: Optional[str],
+    first_frame: Optional[str],
+    last_frame: Optional[str],
+    reference_images: List[str],
+) -> Tuple[Any, str]:
+    """Return (Interactions ``input``, full prompt text sent to the model)."""
+    text = prompt.strip()
+    hint = _image_roles_hint(bool(first_frame), bool(last_frame), len(reference_images))
+    if hint:
+        text += "\n\n" + hint
+    if negative_prompt and negative_prompt.strip():
+        # Omni has no negative-prompt field; the docs recommend stating it in the prompt.
+        text += "\n\nAvoid: " + negative_prompt.strip()
+
+    images = [img for img in (first_frame, last_frame) if img] + list(reference_images)
+    if not images:
+        return text, text
+    return [*(_image_item(img) for img in images), {"type": "text", "text": text}], text
+
+
+# ---------------------------------------------------------------------------
+# Errors from the Interactions API
+# ---------------------------------------------------------------------------
+
+
+def _api_status(error: Exception) -> Optional[int]:
+    status = getattr(error, "status_code", None) or getattr(error, "code", None)
+    return status if isinstance(status, int) else None
+
+
+def _api_message(error: Exception) -> str:
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        inner = body.get("error")
+        if isinstance(inner, dict) and inner.get("message"):
+            return str(inner["message"])
+    return str(getattr(error, "message", None) or error)
+
+
+def _create_error(error: Exception) -> HTTPException:
+    """Map an exception from interactions.create to an HTTP error (no job is created)."""
+    status = _api_status(error)
+    message = _api_message(error)
+    if status == 400:
+        logger.warning("Omni rejected the video request: %s", message)
+        return HTTPException(status_code=400, detail=f"The video model rejected the request: {message}")
+    if status == 429:
+        return HTTPException(
+            status_code=429,
+            detail="The video service is busy or the API quota is exhausted. Please try again later.",
+        )
+    if status in (401, 403):
+        logger.error("Omni authentication/permission error: %s", message)
+        return HTTPException(status_code=502, detail=f"The video service refused access: {message}")
+    logger.exception("Video generation failed to start")
+    return HTTPException(
+        status_code=502, detail=f"The video service could not start the job: {message}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Job creation
+# ---------------------------------------------------------------------------
+
+
+async def _start_video_job(
+    *,
+    auth: AuthTuple,
+    request: Request,
+    model_info: Dict[str, Any],
+    prompt: str,
+    input_payload: Any,
+    options: Dict[str, Any],
+    mode: str,
+    details: Dict[str, Any],
+    message: str,
+) -> SuccessResponse:
+    """Create an Omni background interaction, record it as a job and build the response."""
+    _, db_user = auth
+    model_name = model_info["id"]
+    client = get_video_client()
+    response_format = {
+        "type": "video",
+        "aspect_ratio": options["aspectRatio"],
+        "resolution": options["resolution"],
+        "duration": f"{options['durationSeconds']}s",
+    }
+
+    logger.info(
+        "Starting %s video generation (model=%s, user=%s, %s)",
+        mode, model_name, db_user.id, response_format,
+    )
+    started = time.monotonic()
+    try:
+        interaction = await run_in_threadpool(
+            lambda: client.interactions.create(
+                model=model_name,
+                input=input_payload,
+                response_format=response_format,
+                background=True,
+                store=True,
+                timeout=CREATE_TIMEOUT_SECONDS,
+            )
+        )
+    except Exception as error:
+        raise _create_error(error)
+
+    job_id = str(uuid.uuid4())
+    queue = get_video_queue()
+    queue.create_job(
+        {
+            "id": job_id,
+            "jobId": job_id,
+            "operationId": interaction.id,
+            "userId": db_user.id,
+            "prompt": prompt,
+            "model": model_name,
+            "mode": mode,
+            "status": "processing",
+            "progress": 0,
+            "ipAddress": get_client_ip(request),  # abuse tracking
+            "details": {"mode": mode, **options, **details},
+        }
+    )
+    logger.info(
+        "Video job %s started as interaction %s (%.1fs)",
+        job_id, interaction.id, time.monotonic() - started,
+    )
+
+    data: Dict[str, Any] = {
+        "jobId": job_id,
+        "status": "processing",
+        "progress": 0,
+        "generatedAt": datetime.now().isoformat(),
+        "message": message,
+    }
+    if str(getattr(interaction, "status", "")) not in _PENDING_STATUSES:
+        # Finished (or failed) immediately: settle it now instead of on the first poll.
+        def settle() -> Dict[str, Any]:
+            with _job_lock(job_id):
+                return _apply_interaction(queue.get_job(job_id), interaction)
+
+        data = {**data, **(await run_in_threadpool(settle))}
+    return SuccessResponse(success=True, data=data)
+
+
+async def _precheck(auth: AuthTuple) -> None:
+    """Quota and rate-limit checks shared by all job-creating endpoints."""
+    _, db_user = auth
+    has_quota, error_msg = QuotaManager.check_quota(db_user.id, "video")
+    if not has_quota:
+        raise HTTPException(status_code=429, detail=error_msg)
+    await check_rate_limit(db_user.id, "video")
 
 
 @router.post("/generate", response_model=SuccessResponse)
 async def generate_video(
     req: VideoGenerationRequest,
     request: Request,
-    auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
+    auth: AuthTuple = Depends(get_current_user_with_db),
 ):
     """
-    Generate a video from a text prompt
-    Supports:
-    - Negative prompts (what NOT to include)
-    - First frame (image as starting frame)
-    - Last frame (image as ending frame)
-    - Reference images (up to 3, for visual guidance - not as frames)
+    Generate a video from a text prompt with Gemini Omni Flash.
 
+    Optional: negative prompt (appended as "Avoid: ..."), first frame, last
+    frame, up to 3 reference images, aspect ratio, resolution and duration.
     Requires authentication and checks user quotas.
-    See: https://ai.google.dev/gemini-api/docs/video
     """
-    try:
-        login_user, db_user = auth
+    await _precheck(auth)
+    model_info = _resolve_video_model(req.model)
+    options = _output_options(req, model_info)
 
-        # Get client IP for abuse tracking
-        client_ip = get_client_ip(request)
-
-        # Check quota before generation
-        has_quota, error_msg = QuotaManager.check_quota(db_user.id, "video")
-        if not has_quota:
-            raise HTTPException(status_code=429, detail=error_msg)
-
-        # Check rate limit
-        await check_rate_limit(db_user.id, "video")
-
-        client = get_client()
-
-        requested_model_id = (req.model or "").strip()
-
-        try:
-            model_info = resolve_model_choice("video", req.model)
-        except LookupError as error:
-            status_code = 400 if requested_model_id else 503
-            raise HTTPException(status_code=status_code, detail=str(error))
-        model_name = model_info["id"]
-
-        # Check if advanced features are supported by this model
-        # Use capabilities from model info
-        capabilities = model_info.get("capabilities", {})
-        video_ref_config = capabilities.get("video_reference_images", {})
-        supports_advanced_frames = video_ref_config.get("enabled", False)
-
-        # Build config for advanced options
-        config_kwargs = {}
-
-        # IMPORTANT: Veo 3.1 API does NOT support combining last_frame with reference_images
-        # Valid combinations:
-        #   - image (first frame) + last_frame (for frame interpolation)
-        #   - image (first frame) + reference_images (for style-guided video from starting frame)
-        #   - reference_images only (for style-guided video generation)
-        # Invalid: last_frame + reference_images
-        if req.lastFrame and req.referenceImages and len(req.referenceImages) > 0:
+    references = list(req.referenceImages or [])
+    max_refs = (
+        model_info.get("capabilities", {}).get("video_reference_images", {}).get("max", MAX_REFERENCE_IMAGES)
+    )
+    if req.firstFrame:
+        _require_frame_support(model_info, "First frame")
+    if req.lastFrame:
+        _require_frame_support(model_info, "Last frame")
+    if references:
+        _require_frame_support(model_info, "Reference images")
+        if len(references) > max_refs:
             raise HTTPException(
                 status_code=400,
-                detail="Cannot use last frame and reference images together. "
-                "Use either: (1) first+last frames for interpolation, OR (2) first frame+reference images for style-guided generation. "
-                "See: https://ai.google.dev/gemini-api/docs/video",
+                detail=f"Too many reference images: {model_info['id']} supports up to {max_refs}.",
             )
 
-        # Add negative prompt if provided
-        if req.negativePrompt:
-            config_kwargs["negative_prompt"] = req.negativePrompt
-
-        # Add last frame if provided (ending frame) - goes in config
-        if req.lastFrame:
-            if not supports_advanced_frames:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Last frame is not supported by {model_name}. "
-                    "Please use 'veo-3.1-generate-preview' (standard, not fast) for last frame support.",
-                )
-            image_bytes, mime_type = extract_base64_bytes(req.lastFrame)
-            config_kwargs["last_frame"] = create_image_from_bytes(
-                image_bytes, mime_type
-            )
-
-        # Add reference images if provided (up to 3, for content/style guidance) - goes in config
-        # NOTE: Reference images are only supported by standard Veo models, NOT fast variants
-        # IMPORTANT: Cannot be used together with first frame (image parameter)
-        if req.referenceImages and len(req.referenceImages) > 0:
-            if not supports_advanced_frames:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Reference images are not supported by {model_name}. "
-                    "Please use 'veo-3.1-generate-preview' (standard, not fast) for reference image support.",
-                )
-
-            reference_images = []
-            for img_data in req.referenceImages[:3]:  # Max 3 images
-                image_bytes, mime_type = extract_base64_bytes(img_data)
-                # Create VideoGenerationReferenceImage with reference_type="asset"
-                ref_img = types.VideoGenerationReferenceImage(
-                    image=create_image_from_bytes(image_bytes, mime_type),
-                    reference_type="asset",  # Use "asset" for style/content guidance
-                )
-                reference_images.append(ref_img)
-            config_kwargs["reference_images"] = reference_images
-
-        # Create config if we have any advanced options
-        config = types.GenerateVideosConfig(**config_kwargs) if config_kwargs else None
-
-        # Build kwargs for generate_videos
-        kwargs = {
-            "model": model_name,
-            "prompt": req.prompt,
-        }
-
-        # Add first frame if provided (starting frame) - goes as 'image' parameter
-        if req.firstFrame:
-            if not supports_advanced_frames:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"First frame is not supported by {model_name}. "
-                    "Please use 'veo-3.1-generate-preview' (standard, not fast) for first frame support.",
-                )
-            image_bytes, mime_type = extract_base64_bytes(req.firstFrame)
-            kwargs["image"] = create_image_from_bytes(image_bytes, mime_type)
-
-        # Add config if we have one
-        if config:
-            kwargs["config"] = config
-
-        # Start video generation (this returns an operation)
-        print(f"Starting video generation with model: {model_name}")
-        print(f"Config: {config_kwargs if config_kwargs else 'None'}")
-        operation = client.models.generate_videos(**kwargs)
-
-        # Create job in queue
-        queue = get_video_queue()
-        job = queue.create_job(
-            {
-                "userId": db_user.id,  # Real user ID
-                "prompt": req.prompt,
-                "model": model_name,
-                "mode": "text",
-                "status": "processing",
-                "progress": 0,
-                "jobId": operation.name,
-                "ipAddress": client_ip,  # Track IP for abuse prevention
-                "details": {
-                    "mode": "text",
-                    "negativePrompt": req.negativePrompt,
-                    "firstFrame": req.firstFrame,
-                    "lastFrame": req.lastFrame,
-                    "referenceImages": req.referenceImages,
-                },
-            }
-        )
-
-        print(f"Video generation started. Operation: {operation.name}")
-
-        return SuccessResponse(
-            success=True,
-            data={
-                "jobId": operation.name,
-                "status": "processing",
-                "progress": 0,
-                "generatedAt": datetime.now().isoformat(),
-                "message": "Video generation started. Use /api/video/status to check progress.",
-            },
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Video generation error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    input_payload, _ = _build_input(
+        req.prompt, req.negativePrompt, req.firstFrame, req.lastFrame, references
+    )
+    mode = _video_mode(bool(req.firstFrame), bool(req.lastFrame), len(references))
+    return await _start_video_job(
+        auth=auth,
+        request=request,
+        model_info=model_info,
+        prompt=req.prompt,
+        input_payload=input_payload,
+        options=options,
+        mode=mode,
+        details={
+            "negativePrompt": req.negativePrompt,
+            "firstFrame": req.firstFrame,
+            "lastFrame": req.lastFrame,
+            "referenceImages": references or None,
+        },
+        message="Video generation started. Use /api/video/status to check progress.",
+    )
 
 
 @router.post("/animate", response_model=SuccessResponse)
 async def animate_image(
     req: VideoAnimateRequest,
     request: Request,
-    auth: Tuple[LoginUser, User] = Depends(get_current_user_with_db),
+    auth: AuthTuple = Depends(get_current_user_with_db),
 ):
     """
-    Animate a still image into a video
-    Uses the image as the first frame
+    Animate a still image into a video (the first image is the first frame,
+    up to 3 more are used as reference images).
     Requires authentication and checks user quotas.
     """
-    try:
-        login_user, db_user = auth
+    await _precheck(auth)
 
-        # Get client IP for abuse tracking
-        client_ip = get_client_ip(request)
+    if not req.sourceImages:
+        raise HTTPException(status_code=400, detail="At least one source image is required")
 
-        # Check quota before generation
-        has_quota, error_msg = QuotaManager.check_quota(db_user.id, "video")
-        if not has_quota:
-            raise HTTPException(status_code=429, detail=error_msg)
+    model_info = _resolve_video_model(req.model)
+    options = _output_options(req, model_info)
+    _require_frame_support(model_info, "First frame")
+    references = req.sourceImages[1 : 1 + MAX_REFERENCE_IMAGES]
+    if references:
+        _require_frame_support(model_info, "Reference images")
 
-        # Check rate limit
-        await check_rate_limit(db_user.id, "video")
+    prompt = req.prompt or "Animate this image with smooth motion"
+    input_payload, _ = _build_input(
+        prompt, req.negativePrompt, req.sourceImages[0], None, references
+    )
+    return await _start_video_job(
+        auth=auth,
+        request=request,
+        model_info=model_info,
+        prompt=prompt,
+        input_payload=input_payload,
+        options=options,
+        mode="animate",
+        details={
+            "negativePrompt": req.negativePrompt,
+            "sourceImages": req.sourceImages,
+        },
+        message="Video animation started. Use /api/video/status to check progress.",
+    )
 
-        if not req.sourceImages or len(req.sourceImages) == 0:
-            raise HTTPException(
-                status_code=400, detail="At least one source image is required"
-            )
 
-        client = get_client()
+# ---------------------------------------------------------------------------
+# Job access helpers
+# ---------------------------------------------------------------------------
 
-        requested_model_id = (req.model or "").strip()
 
-        try:
-            model_info = resolve_model_choice("video", req.model)
-        except LookupError as error:
-            status_code = 400 if requested_model_id else 503
-            raise HTTPException(status_code=status_code, detail=str(error))
-        model_name = model_info["id"]
+def _get_owned_job(job_id: str, auth: AuthTuple) -> Dict[str, Any]:
+    """Return the job if the caller owns it (or is admin); 404 otherwise."""
+    login_user, db_user = auth
+    job = get_video_queue().get_job(job_id)
+    is_admin = "admin" in (login_user.roles or [])
+    if not job or (job["userId"] != db_user.id and not is_admin):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
-        # Use first image as the starting frame
-        image_bytes = extract_base64_bytes(req.sourceImages[0])
 
-        # Build kwargs for generate_videos
-        kwargs = {
-            "model": model_name,
-            "prompt": req.prompt or "Animate this image with smooth motion",
-            "first_frame": image_bytes,
+def _public_job(job: Dict[str, Any]) -> Dict[str, Any]:
+    """Job fields safe/cheap to return (no input images, no video bytes)."""
+    public = {k: v for k, v in job.items() if k not in ("details", "ipAddress")}
+    for key in ("createdAt", "updatedAt", "completedAt"):
+        if hasattr(public.get(key), "isoformat"):
+            public[key] = public[key].isoformat()
+    return public
+
+
+def _stored_video_payload(job: Dict[str, Any]) -> Dict[str, Any]:
+    """Load a completed job's video from the media store as the frontend expects it."""
+    payload: Dict[str, Any] = {}
+    media_id = job.get("mediaId")
+    result = get_media_storage().get_media(media_id) if media_id else None
+    if result:
+        video_base64 = to_base64(result["data"])
+        payload["videoUrl"] = f"data:video/mp4;base64,{video_base64}"
+        payload["videoData"] = video_base64
+    return payload
+
+
+def _completed_response(job: Dict[str, Any], message: str) -> Dict[str, Any]:
+    return {
+        "jobId": job["jobId"],
+        "status": "completed",
+        "progress": 100,
+        "mediaId": job.get("mediaId"),
+        **_stored_video_payload(job),
+        "message": message,
+    }
+
+
+def _failed_response(job_id: str, error: Optional[str]) -> Dict[str, Any]:
+    return {"jobId": job_id, "status": "failed", "error": error}
+
+
+def _fail_job(job: Dict[str, Any], message: str) -> Dict[str, Any]:
+    logger.warning("Video job %s failed: %s", job["jobId"], message)
+    get_video_queue().update_job(job["jobId"], {"status": "failed", "error": message})
+    return _failed_response(job["jobId"], message)
+
+
+# ---------------------------------------------------------------------------
+# Status / finalisation
+# ---------------------------------------------------------------------------
+
+
+def _download_video_uri(uri: str) -> bytes:
+    """Fetch a ``delivery: uri`` result via the Files API (waits until it is ACTIVE)."""
+    client = get_video_client()
+    name = "files/" + uri.split("files/", 1)[-1].split(":", 1)[0].split("?", 1)[0].strip("/")
+    for _ in range(30):
+        state = str(getattr(client.files.get(name=name), "state", "") or "")
+        if state.endswith("ACTIVE"):
+            break
+        if state.endswith("FAILED"):
+            raise RuntimeError(f"Video file {name} failed to process")
+        time.sleep(2)
+    return client.files.download(file=name)
+
+
+def _video_bytes(video: Any) -> Optional[bytes]:
+    data = getattr(video, "data", None)
+    if data:
+        return base64.b64decode(data) if isinstance(data, str) else bytes(data)
+    uri = getattr(video, "uri", None)
+    if uri:
+        return _download_video_uri(uri)
+    return None
+
+
+def _finalize_video(job: Dict[str, Any], video_bytes: bytes) -> Dict[str, Any]:
+    """Store the finished video, charge quota and mark the job completed."""
+    video_base64 = to_base64(video_bytes)
+    first_frame, last_frame = extract_frames(video_bytes)
+
+    user_id = job["userId"]
+    details = {k: v for k, v in (job.get("details") or {}).items() if v is not None}
+    if job.get("mode"):
+        details["mode"] = job["mode"]
+    metadata: Dict[str, Any] = {
+        "prompt": job.get("prompt") or "Video generation",
+        "model": job.get("model") or "gemini-omni-1.1-flash",
+        "userId": user_id,
+        "mimeType": "video/mp4",
+        "ipAddress": job.get("ipAddress"),
+    }
+    if details:
+        metadata["details"] = details
+
+    storage = get_media_storage()
+    media_id = storage.save_media(media_type="video", base64_data=video_base64, metadata=metadata)
+    if first_frame:
+        storage.save_thumbnail(media_id, first_frame)
+
+    QuotaManager.increment_quota(user_id, "video")
+    get_video_queue().update_job(
+        job["jobId"], {"status": "completed", "progress": 100, "mediaId": media_id}
+    )
+    logger.info("Video job %s completed (media %s, %d bytes)", job["jobId"], media_id, len(video_bytes))
+
+    return {
+        "jobId": job["jobId"],
+        "status": "completed",
+        "progress": 100,
+        "videoUrl": f"data:video/mp4;base64,{video_base64}",
+        "videoData": video_base64,
+        "mediaId": media_id,
+        "firstFrameData": first_frame,
+        "lastFrameData": last_frame,
+        "message": "Video generation completed successfully!",
+    }
+
+
+def _interaction_errors(interaction: Any) -> str:
+    parts = []
+    for error in getattr(interaction, "errors", None) or []:
+        message = getattr(error, "message", None) or (error.get("message") if isinstance(error, dict) else None)
+        code = getattr(error, "code", None) or (error.get("code") if isinstance(error, dict) else None)
+        if message or code:
+            parts.append(f"{message or ''}{f' ({code})' if code else ''}".strip())
+    return "; ".join(parts)
+
+
+def _apply_interaction(job: Dict[str, Any], interaction: Any) -> Dict[str, Any]:
+    """Update/finalise a job from an Interaction snapshot. Caller holds the job lock."""
+    job_id = job["jobId"]
+    status = str(getattr(interaction, "status", "") or "")
+
+    if status in _PENDING_STATUSES:
+        get_video_queue().update_job(job_id, {"status": "processing", "progress": 50})
+        return {
+            "jobId": job_id,
+            "status": "processing",
+            "progress": 50,
+            "message": "Video generation in progress...",
         }
 
-        # Add negative prompt if provided
-        if req.negativePrompt:
-            kwargs["negative_prompt"] = req.negativePrompt
+    if status == "completed":
+        video_bytes = _video_bytes(getattr(interaction, "output_video", None))
+        if not video_bytes:
+            text = (getattr(interaction, "output_text", None) or "").strip()
+            message = "No video was returned (the request was possibly filtered by the safety system)."
+            if text:
+                message += f" The model replied: \"{text[:500]}\""
+            return _fail_job(job, message)
+        return _finalize_video(job, video_bytes)
 
-        # Add additional source images as reference images if provided
-        if len(req.sourceImages) > 1:
-            reference_images = []
-            for img_data in req.sourceImages[1:4]:  # Max 3 additional images
-                img_bytes = extract_base64_bytes(img_data)
-                reference_images.append(img_bytes)
-            kwargs["reference_images"] = reference_images
+    labels = {
+        "failed": "Video generation failed",
+        "cancelled": "Video generation was cancelled",
+        "incomplete": "Video generation did not complete",
+        "budget_exceeded": "Video generation stopped: budget exceeded",
+        "requires_action": "Video generation stopped unexpectedly (requires action)",
+    }
+    detail = _interaction_errors(interaction)
+    message = labels.get(status, f"Video generation ended with status '{status or 'unknown'}'")
+    return _fail_job(job, f"{message}: {detail}" if detail else f"{message}.")
 
-        # Start video generation
-        print(f"Starting image animation with model: {kwargs['model']}")
-        operation = client.models.generate_videos(**kwargs)
 
-        # Create job in queue
-        queue = get_video_queue()
-        job = queue.create_job(
-            {
-                "userId": db_user.id,  # Real user ID
-                "prompt": req.prompt or "Animate this image",
-                "model": model_name,
-                "mode": "animate",
-                "status": "processing",
-                "progress": 0,
-                "jobId": operation.name,
-                "ipAddress": client_ip,  # Track IP for abuse prevention
-                "details": {
-                    "mode": "animate",
-                    "negativePrompt": req.negativePrompt,
-                    "sourceImages": req.sourceImages,
-                },
-            }
+def _poll_interaction(job: Dict[str, Any]) -> Dict[str, Any]:
+    """Ask Google about an unfinished job and update/finalise it. Caller holds the job lock."""
+    interaction_id = job.get("operationId")
+    if not interaction_id:
+        return _fail_job(
+            job, "This job cannot be resumed (it was created by an older video model). Please start a new video."
         )
-
-        print(f"Video animation started. Operation: {operation.name}")
-
-        return SuccessResponse(
-            success=True,
-            data={
-                "jobId": operation.name,
-                "status": "processing",
-                "progress": 0,
-                "generatedAt": datetime.now().isoformat(),
-                "message": "Video animation started. Use /api/video/status to check progress.",
-            },
+    try:
+        interaction = get_video_client().interactions.get(interaction_id, timeout=GET_TIMEOUT_SECONDS)
+    except Exception as error:
+        status = _api_status(error)
+        if status in (400, 404):
+            return _fail_job(job, f"The video job is no longer available at Google: {_api_message(error)}")
+        logger.warning("Polling interaction %s failed: %s", interaction_id, error)
+        raise HTTPException(
+            status_code=502,
+            detail="Could not reach the video service to check the job. It is still running; please check again shortly.",
         )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Video animation error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return _apply_interaction(job, interaction)
 
 
 @router.get("/status", response_model=SuccessResponse)
-async def check_video_status(
-    jobId: str = Query(..., description="Operation ID from video generation")
+def check_video_status(
+    jobId: str = Query(..., description="Job id returned by /generate or /animate"),
+    auth: AuthTuple = Depends(get_current_user_with_db),
 ):
     """
-    Check the status of a video generation job
+    Check the status of a video generation job (idempotent).
+
+    Finished jobs are answered from the stored result without contacting Google.
     """
+    job = _get_owned_job(jobId, auth)
+
     try:
-        client = get_client()
-        queue = get_video_queue()
-
-        # Get operation status from Google
-        print(f"Checking status for operation: {jobId}")
-        # The jobId is the operation name string (e.g., "models/veo-3.1.../operations/xxx")
-        # Use the internal _get_videos_operation method with operation_name keyword argument
-        operation = client.operations._get_videos_operation(operation_name=jobId)
-
-        # The operation is returned as a dict, not an object
-        print(f"Operation response type: {type(operation)}")
-        print(
-            f"Operation keys: {operation.keys() if isinstance(operation, dict) else 'N/A'}"
-        )
-
-        # Check if operation is complete
-        is_done = (
-            operation.get("done", False)
-            if isinstance(operation, dict)
-            else getattr(operation, "done", False)
-        )
-
-        if not is_done:
-            # Still processing
-            queue.update_job(jobId, {"status": "processing", "progress": 50})
-
-            return SuccessResponse(
-                success=True,
-                data={
-                    "jobId": jobId,
-                    "status": "processing",
-                    "progress": 50,
-                    "message": "Video generation in progress...",
-                },
-            )
-
-        # Check for errors
-        error = (
-            operation.get("error")
-            if isinstance(operation, dict)
-            else getattr(operation, "error", None)
-        )
-        if error:
-            error_message = str(error)
-            queue.update_job(jobId, {"status": "failed", "error": error_message})
-
-            return SuccessResponse(
-                success=True,
-                data={"jobId": jobId, "status": "failed", "error": error_message},
-            )
-
-        # Video is ready - download it
-        print(f"Video generation complete for operation: {jobId}")
-
-        # Extract response from dict or object
-        response = (
-            operation.get("response")
-            if isinstance(operation, dict)
-            else getattr(operation, "response", None)
-        )
-        if not response:
-            raise Exception("No response in completed operation")
-
-        print(f"Response type: {type(response)}")
-        print(f"Response content: {response}")
-
-        # Try multiple possible keys for generated videos
-        generated_videos = None
-        if isinstance(response, dict):
-            generated_videos = (
-                response.get("generatedVideos")
-                or response.get("generated_videos")
-                or response.get("generateVideoResponse", {}).get("generatedSamples")
-            )
-        else:
-            generated_videos = getattr(response, "generated_videos", None) or getattr(
-                response, "generatedVideos", None
-            )
-        if not generated_videos or len(generated_videos) == 0:
-            # Check for RAI filtering
-            rai_reasons = None
-            if isinstance(response, dict):
-                generate_video_response = response.get("generateVideoResponse", {})
-                rai_reasons = generate_video_response.get("raiMediaFilteredReasons")
+        with _job_lock(job["jobId"]):
+            # Re-read inside the lock: another request may have just finalised it.
+            job = _get_owned_job(jobId, auth)
+            if job["status"] == "completed":
+                data = _completed_response(job, "Video generation completed successfully!")
+            elif job["status"] == "failed":
+                data = _failed_response(job["jobId"], job.get("error"))
             else:
-                # Try attribute access for object
-                generate_video_response = getattr(response, "generateVideoResponse", None)
-                if generate_video_response:
-                    rai_reasons = getattr(generate_video_response, "raiMediaFilteredReasons", None)
-
-            if rai_reasons and len(rai_reasons) > 0:
-                error_message = f"Video generation filtered: {rai_reasons[0]}"
-                queue.update_job(jobId, {"status": "failed", "error": error_message})
-                return SuccessResponse(
-                    success=True,
-                    data={"jobId": jobId, "status": "failed", "error": error_message},
-                )
-
-            raise Exception("No generated videos in response")
-
-        generated_video = generated_videos[0]
-
-        # Extract video reference
-        video_ref = (
-            generated_video.get("video")
-            if isinstance(generated_video, dict)
-            else getattr(generated_video, "video", None)
-        )
-        if not video_ref:
-            raise Exception("No video reference in generated video")
-
-        print(f"Video reference: {video_ref}")
-
-        # Download the video file - video_ref might be a dict with 'uri' or an object
-        if isinstance(video_ref, dict) and "uri" in video_ref:
-            # Use the URI to download
-            video_uri = video_ref["uri"]
-            print(f"Downloading from URI: {video_uri}")
-            # Use requests to download from URI
-            import requests
-
-            response = requests.get(
-                video_uri, headers={"x-goog-api-key": os.getenv("GEMINI_API_KEY")}
-            )
-            response.raise_for_status()
-            video_bytes = response.content
-        else:
-            # Try using client.files.download
-            video_file = client.files.download(file=video_ref)
-            video_bytes = (
-                video_file.read()
-                if hasattr(video_file, "read")
-                else video_ref.get("videoBytes", b"")
-            )
-
-        # Convert to base64
-        video_base64 = base64.b64encode(video_bytes).decode("utf-8")
-
-        # Extract first and last frames from video
-        print("Extracting first and last frames from video...")
-        first_frame_base64, last_frame_base64 = extract_frames(video_bytes)
-
-        if first_frame_base64:
-            print(
-                f"Successfully extracted first frame ({len(first_frame_base64)} bytes)"
-            )
-        else:
-            print("Warning: Could not extract first frame")
-
-        if last_frame_base64:
-            print(f"Successfully extracted last frame ({len(last_frame_base64)} bytes)")
-        else:
-            print("Warning: Could not extract last frame")
-
-        # Save to storage with metadata from the original request
-        storage = get_media_storage()
-        job_data = queue.get_job(jobId)
-
-        prompt_for_metadata = (job_data or {}).get("prompt") or "Video generation"
-        model_for_metadata = (job_data or {}).get("model") or "veo"
-        user_id = (job_data or {}).get("userId") or "anonymous"
-
-        details: Dict[str, object] = {}
-        if job_data:
-            if job_data.get("mode"):
-                details["mode"] = job_data.get("mode")
-
-            job_details = job_data.get("details")
-            if isinstance(job_details, dict):
-                for key, value in job_details.items():
-                    if value is not None:
-                        details[key] = value
-
-        # Get IP address from job data
-        ip_address = job_data.get("ipAddress")
-
-        metadata_payload = {
-            "prompt": prompt_for_metadata,
-            "model": model_for_metadata,
-            "userId": user_id,
-            "mimeType": "video/mp4",
-            "ipAddress": ip_address,  # Track IP for abuse prevention
-        }
-        if details:
-            metadata_payload["details"] = details
-
-        media_id = storage.save_media(
-            media_type="video",
-            base64_data=video_base64,
-            metadata=metadata_payload,
-        )
-
-        print(f"Video saved with ID: {media_id}")
-
-        # Save first frame as thumbnail if available
-        if first_frame_base64:
-            storage.save_thumbnail(media_id, first_frame_base64)
-            print(f"Saved thumbnail for video {media_id}")
-
-        # Increment quota after successful video generation
-        QuotaManager.increment_quota(user_id, "video")
-
-        # Update job
-        queue.update_job(
-            jobId,
-            {
-                "status": "completed",
-                "progress": 100,
-                "videoUrl": f"data:video/mp4;base64,{video_base64}",
-                "videoData": video_base64,
-                "mediaId": media_id,
-                "firstFrameData": first_frame_base64,
-                "lastFrameData": last_frame_base64,
-            },
-        )
-
-        return SuccessResponse(
-            success=True,
-            data={
-                "jobId": jobId,
-                "status": "completed",
-                "progress": 100,
-                "videoUrl": f"data:video/mp4;base64,{video_base64}",
-                "videoData": video_base64,
-                "mediaId": media_id,
-                "firstFrameData": first_frame_base64,
-                "lastFrameData": last_frame_base64,
-                "message": "Video generation completed successfully!",
-            },
-        )
-
+                data = _poll_interaction(job)
+        return SuccessResponse(success=True, data=data)
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error checking video status: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Error checking video status for %s", jobId)
+        raise HTTPException(status_code=500, detail=f"Error checking video status: {e}")
 
 
 @router.get("/jobs", response_model=SuccessResponse)
-async def list_video_jobs():
+def list_video_jobs(auth: AuthTuple = Depends(get_current_user_with_db)):
+    """List the current user's video jobs (without video data; use mediaId or /jobs/{id})."""
+    _, db_user = auth
+    jobs = get_video_queue().list_jobs(db_user.id)
+    return SuccessResponse(success=True, data={"jobs": [_public_job(job) for job in jobs]})
+
+
+@router.get("/jobs/{job_id:path}", response_model=SuccessResponse)
+def get_video_job(job_id: str, auth: AuthTuple = Depends(get_current_user_with_db)):
+    """Get one of the current user's jobs; completed jobs include the video as a data URL."""
+    job = _get_owned_job(job_id, auth)
+    data = _public_job(job)
+    if job["status"] == "completed":
+        data.update(_stored_video_payload(job))
+    return SuccessResponse(success=True, data=data)
+
+
+# ---------------------------------------------------------------------------
+# Startup recovery
+# ---------------------------------------------------------------------------
+
+
+def recover_video_jobs() -> int:
+    """Fail unfinished jobs that can never complete (retired model, no interaction id, too old).
+
+    Called once from the app lifespan. Recent Omni jobs are left alone: the next
+    /status poll resumes them from their stored interaction id.
     """
-    List all video generation jobs
-    """
+    known = [m["id"] for m in get_model_registry().get("video", [])]
     try:
-        queue = get_video_queue()
-        jobs = queue.list_jobs("anonymous")
-
-        return SuccessResponse(success=True, data={"jobs": jobs})
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/jobs/{job_id}", response_model=SuccessResponse)
-async def get_video_job(job_id: str):
-    """
-    Get a specific video generation job
-    """
-    try:
-        queue = get_video_queue()
-        job = queue.get_job(job_id)
-
-        if not job:
-            raise HTTPException(status_code=404, detail="Job not found")
-
-        return SuccessResponse(success=True, data=job)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        count = get_video_queue().fail_unresumable_jobs(known)
+    except Exception:
+        logger.exception("Video job recovery failed")
+        return 0
+    if count:
+        logger.info("Marked %d unresumable video job(s) as failed", count)
+    return count

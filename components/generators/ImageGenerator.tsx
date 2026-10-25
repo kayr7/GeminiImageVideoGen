@@ -10,9 +10,12 @@ import MultiFileUpload from '../ui/MultiFileUpload';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import QuotaDisplay from './QuotaDisplay';
 import TemplateSelector from '../shared/TemplateSelector';
+import PlaceholderFields from '../shared/PlaceholderFields';
+import { preparePrompt } from '@/lib/templates/utils';
 import { CONSTANTS } from '@/lib/utils/constants';
 import { useAuth } from '@/lib/context/AuthContext';
 import { apiFetch, resolveApiUrl } from '@/lib/utils/apiClient';
+import { downloadFromUrl, getApiErrorMessage } from '@/lib/utils/files';
 import type { ModelInfo } from '@/types';
 
 export default function ImageGenerator() {
@@ -37,6 +40,7 @@ export default function ImageGenerator() {
   }, [availableImageModels, imageModelAvailability?.default]);
 
   const [prompt, setPrompt] = useState('');
+  const [placeholderValues, setPlaceholderValues] = useState<Record<string, string>>({});
   const [model, setModel] = useState<string>('');
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
@@ -72,23 +76,10 @@ export default function ImageGenerator() {
     [availableImageModels, model]
   );
 
-  const referenceImagesAllowed = useMemo(() => {
-    if (!selectedModel) {
-      return true;
-    }
-
-    return !selectedModel.id.toLowerCase().includes('imagen');
-  }, [selectedModel]);
-
-  useEffect(() => {
-    if (!referenceImagesAllowed && referenceImages.length > 0) {
-      setReferenceImages([]);
-    }
-  }, [referenceImagesAllowed, referenceImages]);
-
   const maxReferenceImages = useMemo(() => {
-    if (!selectedModel?.capabilities?.reference_images) return 5;
-    return selectedModel.capabilities.reference_images.max;
+    const refs = selectedModel?.capabilities?.reference_images;
+    if (!refs) return 0;
+    return refs.enabled === false ? 0 : refs.max;
   }, [selectedModel]);
 
   const imageGenerationEnabled = config ? config.features.imageGeneration : true;
@@ -96,6 +87,17 @@ export default function ImageGenerator() {
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       setError('Please enter a prompt');
+      return;
+    }
+
+    // Fill {{placeholders}} typed into the prompt (or coming from a template).
+    const { prompt: resolvedPrompt, error: placeholderError } = preparePrompt(
+      prompt,
+      placeholderValues,
+      CONSTANTS.MAX_PROMPT_LENGTH,
+    );
+    if (placeholderError) {
+      setError(placeholderError);
       return;
     }
 
@@ -109,29 +111,25 @@ export default function ImageGenerator() {
     setGeneratedImage(null);
 
     try {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-
       const response = await apiFetch('/api/image/generate', {
         method: 'POST',
-        headers,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt,
+          prompt: resolvedPrompt,
           model: model || undefined,
             aspectRatio,
             referenceImages:
-              referenceImagesAllowed && referenceImages.length > 0 ? referenceImages : undefined,
+              maxReferenceImages > 0 && referenceImages.length > 0 ? referenceImages : undefined,
           }),
       });
 
-      const data = await response.json();
+      // Non-JSON bodies (e.g. a proxy timeout page) must not hide the HTTP status.
+      const data = await response.json().catch(() => null);
 
       if (!response.ok) {
-        throw new Error(data.detail || data.error?.message || 'Failed to generate image');
+        throw new Error(
+          getApiErrorMessage(data, `Failed to generate image (HTTP ${response.status})`)
+        );
       }
 
       // Handle image data
@@ -152,12 +150,7 @@ export default function ImageGenerator() {
   const handleDownload = () => {
     if (!generatedImage) return;
 
-    const link = document.createElement('a');
-    link.href = generatedImage;
-    link.download = `generated-image-${Date.now()}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadFromUrl(generatedImage, `generated-image-${Date.now()}.png`);
   };
 
   if (initialising) {
@@ -251,6 +244,13 @@ export default function ImageGenerator() {
             maxLength={CONSTANTS.MAX_PROMPT_LENGTH}
           />
 
+          <PlaceholderFields
+            text={prompt}
+            values={placeholderValues}
+            onChange={setPlaceholderValues}
+            disabled={loading}
+          />
+
           <div className="grid grid-cols-2 gap-4">
             <Select
               label="Model"
@@ -277,24 +277,15 @@ export default function ImageGenerator() {
             />
           </div>
 
-          <MultiFileUpload
-            label={`Reference Images (Max ${maxReferenceImages})`}
-            accept="image/*"
-            maxFiles={maxReferenceImages}
-            onFilesSelect={(files, base64Array) => setReferenceImages(base64Array)}
-            preview
-            helperText={
-              referenceImagesAllowed
-                ? 'Upload multiple images for composition or style transfer'
-                : undefined
-            }
-            disabled={!referenceImagesAllowed}
-          />
-
-          {!referenceImagesAllowed && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">
-              Reference images are not supported with Imagen models.
-            </p>
+          {maxReferenceImages > 0 && (
+            <MultiFileUpload
+              label={`Reference Images (Max ${maxReferenceImages})`}
+              accept="image/*"
+              maxFiles={maxReferenceImages}
+              onFilesSelect={(files, base64Array) => setReferenceImages(base64Array.slice(0, maxReferenceImages))}
+              preview
+              helperText="Upload multiple images for composition or style transfer"
+            />
           )}
 
           {selectedModel && (
@@ -348,12 +339,12 @@ export default function ImageGenerator() {
             <ul className="text-sm text-blue-800 space-y-1">
               <li>• Be specific and detailed in your prompt</li>
               <li>• Mention style, mood, lighting, and composition</li>
+              <li>• Describe the picture itself — greetings or questions may get no image</li>
+              <li>• Real people, brands and logos are often blocked by the safety filter</li>
               <li>• <strong>Multiple images:</strong> Combine elements or transfer style</li>
               <li>• <strong>Single image:</strong> Best for editing or variations</li>
-              <li>• <strong>Nano Banana 2:</strong> Best overall — pro quality at flash speed, up to 10 ref images</li>
-              <li>• <strong>Nano Banana Pro:</strong> Reasoning-driven, complex instructions, up to 14 ref images</li>
-              <li>• <strong>Imagen Ultra:</strong> Highest quality text-to-image (no ref images)</li>
-              <li>• <strong>Imagen Fast:</strong> Cheapest &amp; fastest text-to-image</li>
+              <li>• <strong>Nano Banana 2:</strong> Best overall — pro quality at flash speed, reference images supported</li>
+              <li>• <strong>Nano Banana Pro:</strong> Reasoning-driven, complex instructions, reference images supported</li>
             </ul>
           </div>
         </div>

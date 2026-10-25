@@ -3,91 +3,74 @@ Video frame extraction utilities using OpenCV.
 Extracts first and last frames from video bytes.
 """
 
+import base64
+import logging
+import os
+import tempfile
+from contextlib import contextmanager
+from typing import Iterator, Optional, Tuple
+
 import cv2
 import numpy as np
-import base64
-from typing import Tuple, Optional
+
+logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _temp_video_file(video_bytes: bytes) -> Iterator[str]:
+    """Write video bytes to a temp .mp4 (OpenCV needs a path) and clean up afterwards."""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_file:
+        temp_file.write(video_bytes)
+        temp_path = temp_file.name
+    try:
+        yield temp_path
+    finally:
+        try:
+            os.unlink(temp_path)
+        except OSError as e:
+            logger.warning("Could not delete temp file %s: %s", temp_path, e)
 
 
 def extract_frames(video_bytes: bytes) -> Tuple[Optional[str], Optional[str]]:
     """
     Extract first and last frames from video bytes.
-    
-    Args:
-        video_bytes: Raw video file bytes (MP4 format)
-    
+
     Returns:
-        Tuple of (first_frame_base64, last_frame_base64)
-        Returns (None, None) if extraction fails
+        Tuple of (first_frame_base64, last_frame_base64) as JPEGs,
+        or (None, None) if extraction fails.
     """
     try:
-        # Write video bytes to temporary array
-        video_array = np.frombuffer(video_bytes, dtype=np.uint8)
-        
-        # Open video from memory
-        video = cv2.VideoCapture()
-        video.open(cv2.CAP_FFMPEG)
-        
-        # Try alternative method - write to temp file and read
-        import tempfile
-        import os
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
-            temp_file.write(video_bytes)
-            temp_path = temp_file.name
-        
-        try:
-            # Open video from temp file
-            video = cv2.VideoCapture(temp_path)
-            
-            if not video.isOpened():
-                print("Error: Could not open video")
-                return None, None
-            
-            # Get total frame count
-            total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-            
-            if total_frames == 0:
-                print("Error: Video has no frames")
-                video.release()
-                return None, None
-            
-            # Extract first frame
-            video.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            ret, first_frame = video.read()
-            
-            if not ret or first_frame is None:
-                print("Error: Could not read first frame")
-                video.release()
-                return None, None
-            
-            # Extract last frame (go to last frame - 1 to ensure we get a valid frame)
-            last_frame_index = max(0, total_frames - 2)
-            video.set(cv2.CAP_PROP_POS_FRAMES, last_frame_index)
-            ret, last_frame = video.read()
-            
-            if not ret or last_frame is None:
-                print("Warning: Could not read last frame, using first frame")
-                last_frame = first_frame
-            
-            # Release video capture
-            video.release()
-            
-            # Convert frames to JPEG and base64
-            first_frame_base64 = frame_to_base64(first_frame)
-            last_frame_base64 = frame_to_base64(last_frame)
-            
-            return first_frame_base64, last_frame_base64
-            
-        finally:
-            # Clean up temp file
+        with _temp_video_file(video_bytes) as path:
+            video = cv2.VideoCapture(path)
             try:
-                os.unlink(temp_path)
-            except Exception as e:
-                print(f"Warning: Could not delete temp file: {e}")
-    
-    except Exception as e:
-        print(f"Error extracting frames: {str(e)}")
+                if not video.isOpened():
+                    logger.warning("Could not open video for frame extraction")
+                    return None, None
+
+                total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+                if total_frames == 0:
+                    logger.warning("Video has no frames")
+                    return None, None
+
+                video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ret, first_frame = video.read()
+                if not ret or first_frame is None:
+                    logger.warning("Could not read first frame")
+                    return None, None
+
+                # Seek to second-to-last frame to make sure the read succeeds
+                video.set(cv2.CAP_PROP_POS_FRAMES, max(0, total_frames - 2))
+                ret, last_frame = video.read()
+                if not ret or last_frame is None:
+                    logger.warning("Could not read last frame, using first frame")
+                    last_frame = first_frame
+            finally:
+                video.release()
+
+        return frame_to_base64(first_frame), frame_to_base64(last_frame)
+
+    except Exception:
+        logger.exception("Error extracting frames")
         return None, None
 
 
@@ -113,46 +96,24 @@ def frame_to_base64(frame: np.ndarray, quality: int = 95) -> str:
 
 
 def get_video_info(video_bytes: bytes) -> dict:
-    """
-    Get video metadata (duration, resolution, frame count).
-    
-    Args:
-        video_bytes: Raw video file bytes
-    
-    Returns:
-        Dictionary with video metadata
-    """
+    """Get video metadata (duration, resolution, frame count)."""
     try:
-        import tempfile
-        import os
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as temp_file:
-            temp_file.write(video_bytes)
-            temp_path = temp_file.name
-        
-        try:
-            video = cv2.VideoCapture(temp_path)
-            
-            if not video.isOpened():
-                return {"error": "Could not open video"}
-            
-            info = {
-                "frame_count": int(video.get(cv2.CAP_PROP_FRAME_COUNT)),
-                "fps": video.get(cv2.CAP_PROP_FPS),
-                "width": int(video.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                "height": int(video.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                "duration_seconds": video.get(cv2.CAP_PROP_FRAME_COUNT) / video.get(cv2.CAP_PROP_FPS)
-            }
-            
-            video.release()
-            return info
-            
-        finally:
+        with _temp_video_file(video_bytes) as path:
+            video = cv2.VideoCapture(path)
             try:
-                os.unlink(temp_path)
-            except Exception as e:
-                print(f"Warning: Could not delete temp file: {e}")
-    
+                if not video.isOpened():
+                    return {"error": "Could not open video"}
+
+                frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+                fps = video.get(cv2.CAP_PROP_FPS)
+                return {
+                    "frame_count": frame_count,
+                    "fps": fps,
+                    "width": int(video.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                    "height": int(video.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                    "duration_seconds": frame_count / fps if fps else 0.0,
+                }
+            finally:
+                video.release()
     except Exception as e:
         return {"error": str(e)}
-

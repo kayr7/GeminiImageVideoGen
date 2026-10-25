@@ -1,0 +1,9 @@
+.data
+data
+.media-storage
+.video-jobs
+__pycache__
+*.pyc
+.env
+.venv
+venv

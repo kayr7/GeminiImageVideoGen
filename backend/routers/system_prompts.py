@@ -6,7 +6,6 @@ from typing import Tuple
 from models import (
     CreateSystemPromptRequest,
     UpdateSystemPromptRequest,
-    SystemPromptResponse,
     SuccessResponse,
     LoginUser,
 )

@@ -1,7 +1,6 @@
 """Pydantic models for request/response validation."""
 
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -9,7 +8,7 @@ from pydantic import BaseModel, Field
 # Image Generation Models
 class ImageGenerationRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=10000)
-    model: Optional[str] = Field(default="gemini-3.1-flash-image-preview")
+    model: Optional[str] = Field(default="gemini-nano-banana-2.1")
     aspectRatio: Optional[str] = Field(default="1:1")
     negativePrompt: Optional[str] = None
     referenceImages: Optional[List[str]] = None
@@ -18,26 +17,25 @@ class ImageGenerationRequest(BaseModel):
 
 class ImageEditRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=10000)
-    model: Optional[str] = Field(default="gemini-3.1-flash-image-preview")
+    model: Optional[str] = Field(default="gemini-nano-banana-2.1")
     aspectRatio: Optional[str] = Field(default="1:1")
     sourceImages: Optional[List[str]] = None
     maskImage: Optional[str] = None
 
 
-class ImageResponse(BaseModel):
-    imageUrl: Optional[str] = None
-    imageData: Optional[str] = None
-    prompt: str
-    model: str
-    generatedAt: datetime
-    mediaId: Optional[str] = None
-
-
 # Video Generation Models
-class VideoGenerationRequest(BaseModel):
+class _VideoOptions(BaseModel):
+    # Values are validated against the chosen model's capabilities in routers/video.py.
+    aspectRatio: Optional[str] = None
+    resolution: Optional[str] = None
+    # The frontend sends the select value as a string ("8"); accept int or numeric string.
+    durationSeconds: Optional[Union[int, str]] = None
+
+
+class VideoGenerationRequest(_VideoOptions):
     prompt: str = Field(..., min_length=1, max_length=10000)
-    model: Optional[str] = Field(default="veo-3.1-fast-generate-preview")
-    negativePrompt: Optional[str] = None
+    model: Optional[str] = None  # None/blank -> configured default video model
+    negativePrompt: Optional[str] = None  # appended to the prompt as "Avoid: ..."
     firstFrame: Optional[str] = None  # Image as starting frame
     lastFrame: Optional[str] = None  # Image as ending frame
     referenceImages: Optional[List[str]] = Field(
@@ -45,41 +43,14 @@ class VideoGenerationRequest(BaseModel):
     )  # Up to 3 reference images
 
 
-class VideoAnimateRequest(BaseModel):
+class VideoAnimateRequest(_VideoOptions):
     prompt: Optional[str] = Field(default="Animate this image with smooth motion")
-    model: Optional[str] = Field(default="veo-3.1-fast-generate-preview")
+    model: Optional[str] = None
     sourceImages: List[str] = Field(..., min_items=1)
     negativePrompt: Optional[str] = None
 
 
-class VideoResponse(BaseModel):
-    videoUrl: Optional[str] = None
-    videoData: Optional[str] = None
-    jobId: Optional[str] = None
-    status: str  # 'completed', 'processing', 'failed'
-    progress: Optional[int] = None
-    estimatedCompletion: Optional[datetime] = None
-    mediaId: Optional[str] = None
-    error: Optional[str] = None
-    firstFrameData: Optional[str] = None  # Base64 encoded first frame image
-    lastFrameData: Optional[str] = None  # Base64 encoded last frame image
-
-
 # Music Generation Models
-class MusicGenerationRequest(BaseModel):
-    description: str = Field(..., min_length=1, max_length=500)
-    duration: Optional[int] = Field(default=30, ge=10, le=60)
-    style: Optional[str] = None
-
-
-class MusicResponse(BaseModel):
-    audioUrl: Optional[str] = None
-    audioData: Optional[str] = None
-    description: str
-    generatedAt: datetime
-    error: Optional[str] = None
-
-
 # Speech Generation Models
 class SpeakerConfig(BaseModel):
     name: str = Field(..., min_length=1)
@@ -91,44 +62,14 @@ class SpeechGenerationRequest(BaseModel):
     voice: Optional[str] = Field(None, min_length=1)
     speakers: Optional[List[SpeakerConfig]] = None
     language: Optional[str] = None
-    model: Optional[str] = Field(default="gemini-2.5-flash-preview-tts")
-
-
-class SpeechResponse(BaseModel):
-    audioUrl: Optional[str] = None
-    audioData: Optional[str] = None
-    text: str
-    voice: str
-    language: Optional[str] = None
-    model: str
-    generatedAt: datetime
-    mediaId: Optional[str] = None
+    model: Optional[str] = Field(default="gemini-3.8-flash-tts")
 
 
 # Media Storage Models
-class MediaMetadata(BaseModel):
-    id: str
-    type: str  # 'image', 'video', or 'audio'
-    filename: str
-    prompt: str
-    model: str
-    userId: str
-    createdAt: datetime
-    fileSize: int
-    mimeType: str
-    details: Optional[Dict[str, Any]] = None
-
-
 # Generic Response Models
 class SuccessResponse(BaseModel):
     success: bool = True
     data: dict = {}
-
-
-class ErrorResponse(BaseModel):
-    success: bool = False
-    error: str
-    details: Optional[List[str]] = None
 
 
 # Authentication Models
@@ -213,6 +154,11 @@ class BulkCreateUsersRequest(BaseModel):
     emails: List[str] = Field(..., min_items=1)
     defaultQuotas: Optional[Dict[str, Dict[str, Any]]] = None
     defaultTags: Optional[List[str]] = None
+
+
+class BulkDeleteUsersRequest(BaseModel):
+    userIds: List[str] = Field(..., min_length=1, max_length=500)
+    deleteMedia: bool = True
 
 
 class UpdateUserRequest(BaseModel):
@@ -302,23 +248,7 @@ class TextGenerationRequest(BaseModel):
     systemPromptId: Optional[str] = None
     templateId: Optional[str] = None
     variableValues: Optional[Dict[str, str]] = None
-    model: Optional[str] = Field(default="gemini-2.0-flash-exp")
-
-
-class TextGenerationResponse(BaseModel):
-    id: str
-    userId: str
-    mode: str
-    systemPrompt: Optional[str]
-    systemPromptId: Optional[str]
-    userMessage: str
-    templateId: Optional[str]
-    filledMessage: str
-    variableValues: Optional[Dict[str, str]]
-    modelResponse: str
-    model: str
-    ipAddress: Optional[str]
-    createdAt: str
+    model: Optional[str] = Field(default="gemini-3.8-flash")
 
 
 class CreateChatSessionRequest(BaseModel):
@@ -332,24 +262,74 @@ class UpdateChatSessionRequest(BaseModel):
     system_prompt: Optional[str] = Field(None, alias="systemPrompt")
 
 
-class ChatSessionResponse(BaseModel):
-    id: str
-    userId: str
-    name: Optional[str]
-    systemPrompt: Optional[str]
-    systemPromptId: Optional[str]
-    createdAt: str
-    updatedAt: str
-
-
 class SendMessageRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=10000)
-    model: Optional[str] = Field(default="gemini-2.0-flash-exp")
+    model: Optional[str] = Field(default="gemini-3.8-flash")
 
 
-class ChatMessageResponse(BaseModel):
-    id: str
-    sessionId: str
-    role: str
-    content: str
-    createdAt: str
+
+
+# Placeholder Models (personal named values that prefill {{NAME}} fields)
+from typing import Annotated  # noqa: E402
+
+from pydantic import AfterValidator  # noqa: E402
+
+from utils.placeholder_manager import (  # noqa: E402
+    MAX_DESCRIPTION_LENGTH,
+    MAX_VALUE_LENGTH,
+    NAME_RE,
+)
+
+
+def _clean_placeholder_name(v: Any) -> Any:
+    if isinstance(v, str):
+        v = v.strip()
+        if not NAME_RE.fullmatch(v):
+            raise ValueError("name must be 1-64 characters: letters, digits or underscore")
+    return v
+
+
+def _clean_placeholder_value(v: Any) -> Any:
+    if isinstance(v, str):
+        v = v.strip()
+        if not v:
+            raise ValueError("value must not be empty")
+        if len(v) > MAX_VALUE_LENGTH:
+            raise ValueError(f"value must be at most {MAX_VALUE_LENGTH} characters")
+    return v
+
+
+def _clean_placeholder_description(v: Any) -> Any:
+    if isinstance(v, str):
+        v = v.strip()
+        if len(v) > MAX_DESCRIPTION_LENGTH:
+            raise ValueError(f"description must be at most {MAX_DESCRIPTION_LENGTH} characters")
+        return v or None
+    return v
+
+
+PlaceholderName = Annotated[str, AfterValidator(_clean_placeholder_name)]
+PlaceholderValue = Annotated[str, AfterValidator(_clean_placeholder_value)]
+PlaceholderDescription = Annotated[Optional[str], AfterValidator(_clean_placeholder_description)]
+
+
+class CreatePlaceholderRequest(BaseModel):
+    name: PlaceholderName
+    value: PlaceholderValue
+    description: PlaceholderDescription = None
+
+
+class UpdatePlaceholderRequest(BaseModel):
+    """Any subset; an explicit "description": null/"" clears the description."""
+
+    name: Optional[PlaceholderName] = None
+    value: Optional[PlaceholderValue] = None
+    description: PlaceholderDescription = None
+
+
+class UpsertPlaceholderRequest(BaseModel):
+    """PUT /by-name/{name}: description is left unchanged when omitted."""
+
+    value: PlaceholderValue
+    description: PlaceholderDescription = None
+

@@ -1,84 +1,101 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import LoadingSpinner from '@/components/shared/LoadingSpinner';
 import { useAuth } from '@/lib/context/AuthContext';
 import { apiFetch, resolveApiUrl } from '@/lib/utils/apiClient';
+import { formatDateTime } from '@/lib/utils/files';
+
+type MediaType = 'image' | 'video' | 'audio';
+type TypeFilter = 'all' | MediaType;
 
 interface MediaDetails {
-  mode?: string;
-  negativePrompt?: string | null;
-  firstFrame?: string | null;
-  lastFrame?: string | null;
-  referenceImages?: string[] | null;
-  sourceImages?: string[] | null;
+  mode: string | null;
+  negativePrompt: string | null;
+  firstFrame: string | null;
+  lastFrame: string | null;
+  referenceImages: string[];
+  sourceImages: string[];
 }
 
 interface MediaItem {
   id: string;
-  type: 'image' | 'video';
+  type: MediaType;
   prompt: string;
   model: string;
   createdAt: string;
   fileSize: number;
   mimeType: string;
   url: string;
-  details?: MediaDetails | null;
-  ipAddress?: string | null;
-  userEmail?: string | null;
-  userId?: string | null;
+  thumbnailUrl: string;
+  details: MediaDetails;
+  ipAddress: string | null;
+  userEmail: string | null;
+  userId: string | null;
 }
 
 interface MediaListResponse {
   success: boolean;
-  data?: {
-    media?: Array<Record<string, unknown>>;
-    total?: number;
-  };
+  data?: { media?: Array<Record<string, unknown>>; total?: number; pages?: number };
   error?: { message?: string };
 }
 
-const formatDate = (value: string): string => {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return date.toLocaleString();
-};
+const PAGE_SIZE = 24;
+const PROMPT_TRUNCATE_LENGTH = 100;
 
-const URL_SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:/i;
-
-const resolveMediaUrl = (rawUrl: string): string => {
-  if (!rawUrl) {
-    return '';
-  }
-  if (URL_SCHEME_PATTERN.test(rawUrl)) {
-    return rawUrl;
-  }
-  const prefixed = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`;
-  return resolveApiUrl(prefixed);
-};
-
-const extractStringArray = (value: unknown): string[] => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
-};
+const FILTERS: Array<{ value: TypeFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'image', label: 'Images' },
+  { value: 'video', label: 'Videos' },
+  { value: 'audio', label: 'Audio' },
+];
 
 const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 
-const PROMPT_TRUNCATE_LENGTH = 100;
+const toUrl = (value: unknown): string => (isNonEmptyString(value) ? resolveApiUrl(value) : '');
+
+const toUrlArray = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter(isNonEmptyString).map((v) => resolveApiUrl(v)) : [];
+
+const parseItem = (raw: Record<string, unknown>): MediaItem | null => {
+  if (!isNonEmptyString(raw.id)) {
+    return null;
+  }
+  const id = raw.id;
+  const d = (raw.details ?? {}) as Record<string, unknown>;
+  const type: MediaType = raw.type === 'video' || raw.type === 'audio' ? raw.type : 'image';
+  return {
+    id,
+    type,
+    prompt: isNonEmptyString(raw.prompt) ? raw.prompt : 'Untitled generation',
+    model: isNonEmptyString(raw.model) ? raw.model : 'Unknown model',
+    createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : '',
+    fileSize: typeof raw.fileSize === 'number' ? raw.fileSize : 0,
+    mimeType: isNonEmptyString(raw.mimeType) ? raw.mimeType : '',
+    url: toUrl(raw.url) || resolveApiUrl(`/api/media/${id}`),
+    thumbnailUrl: toUrl(raw.thumbnailUrl),
+    details: {
+      mode: isNonEmptyString(d.mode) ? d.mode : null,
+      negativePrompt: isNonEmptyString(d.negativePrompt) ? d.negativePrompt : null,
+      firstFrame: toUrl(d.firstFrame) || null,
+      lastFrame: toUrl(d.lastFrame) || null,
+      referenceImages: toUrlArray(d.referenceImages),
+      sourceImages: toUrlArray(d.sourceImages),
+    },
+    ipAddress: isNonEmptyString(raw.ipAddress) ? raw.ipAddress : null,
+    userEmail: isNonEmptyString(raw.userEmail) ? raw.userEmail : null,
+    userId: isNonEmptyString(raw.userId) ? raw.userId : null,
+  };
+};
 
 const TruncatedPrompt = ({ prompt }: { prompt: string }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const shouldTruncate = prompt.length > PROMPT_TRUNCATE_LENGTH;
-  
+
   if (!shouldTruncate) {
     return <h2 className="text-lg font-semibold text-gray-900 dark:text-white break-words">{prompt}</h2>;
   }
-  
+
   return (
     <div>
       <h2 className="text-lg font-semibold text-gray-900 dark:text-white break-words">
@@ -95,224 +112,339 @@ const TruncatedPrompt = ({ prompt }: { prompt: string }) => {
   );
 };
 
+/** Lazy image with skeleton until loaded and a fallback on error. */
+const LazyImage = ({ src, alt, className }: { src: string; alt: string; className: string }) => {
+  const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>(src ? 'loading' : 'error');
+
+  if (status === 'error') {
+    return (
+      <div className={`${className} flex items-center justify-center text-2xl text-gray-400`} role="img" aria-label={alt}>
+        🖼️
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {status === 'loading' && <div className="absolute inset-0 animate-pulse bg-gray-200 dark:bg-gray-700" aria-hidden="true" />}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt}
+        loading="lazy"
+        decoding="async"
+        onLoad={() => setStatus('loaded')}
+        onError={() => setStatus('error')}
+        className={`${className} ${status === 'loaded' ? 'opacity-100' : 'opacity-0'} transition-opacity`}
+      />
+    </>
+  );
+};
+
+const RefThumb = ({ src, label, alt }: { src: string; label: string; alt: string }) => (
+  <div className="w-20">
+    <div className="relative w-20 h-20 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800">
+      <LazyImage src={src} alt={alt} className="absolute inset-0 w-full h-full object-cover" />
+    </div>
+    <p className="text-[10px] text-center text-gray-500 dark:text-gray-400 mt-1">{label}</p>
+  </div>
+);
+
+interface CardProps {
+  item: MediaItem;
+  isAdmin: boolean;
+  onOpen: (item: MediaItem) => void;
+  onDelete: (id: string) => void;
+}
+
+const MediaCard = memo(function MediaCard({ item, isAdmin, onOpen, onDelete }: CardProps) {
+  const { details } = item;
+  const hasRefs =
+    details.referenceImages.length > 0 || details.sourceImages.length > 0 || details.firstFrame || details.lastFrame;
+
+  return (
+    <article className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm flex flex-col">
+      <div className="relative aspect-[4/3] bg-gray-100 dark:bg-gray-800">
+        {item.type === 'audio' ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4">
+            <span className="text-4xl" aria-hidden="true">🎵</span>
+            <audio controls preload="none" src={item.url} className="w-full" />
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onOpen(item)}
+            className="absolute inset-0 w-full h-full group cursor-pointer"
+            aria-label={`Open ${item.type}: ${item.prompt}`}
+          >
+            <LazyImage src={item.thumbnailUrl} alt={item.prompt} className="absolute inset-0 w-full h-full object-contain bg-black" />
+            {item.type === 'video' && (
+              <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <span className="w-14 h-14 rounded-full bg-black/60 text-white text-2xl flex items-center justify-center">▶</span>
+              </span>
+            )}
+            <span className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+          </button>
+        )}
+        <span className="absolute top-3 left-3 inline-flex items-center rounded-full bg-blue-600/90 text-white text-xs font-semibold px-3 py-1 uppercase tracking-wide pointer-events-none">
+          {item.type}
+        </span>
+      </div>
+
+      <div className="flex-1 p-5 space-y-4">
+        <div>
+          <TruncatedPrompt prompt={item.prompt} />
+          {item.createdAt && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Generated {formatDateTime(item.createdAt)}</p>
+          )}
+        </div>
+
+        <div className="text-sm text-gray-700 dark:text-gray-300 space-y-1">
+          <p>
+            <span className="font-medium">Model:</span> {item.model}
+          </p>
+          {details.mode && (
+            <p>
+              <span className="font-medium">Mode:</span> {details.mode}
+            </p>
+          )}
+          {details.negativePrompt && (
+            <div className="text-sm">
+              <span className="font-medium">Negative prompt:</span>{' '}
+              {details.negativePrompt.length > 80 ? (
+                <>
+                  {details.negativePrompt.slice(0, 80)}...
+                  <span className="text-xs text-gray-500 dark:text-gray-400"> (truncated)</span>
+                </>
+              ) : (
+                details.negativePrompt
+              )}
+            </div>
+          )}
+        </div>
+
+        {hasRefs && (
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Reference imagery</h3>
+            <div className="flex flex-wrap gap-3">
+              {details.firstFrame && <RefThumb src={details.firstFrame} alt="First frame" label="First" />}
+              {details.lastFrame && <RefThumb src={details.lastFrame} alt="Last frame" label="Last" />}
+              {details.referenceImages.map((src, i) => (
+                <RefThumb key={`ref-${i}`} src={src} alt={`Reference ${i + 1}`} label={`Ref ${i + 1}`} />
+              ))}
+              {details.sourceImages.map((src, i) => (
+                <RefThumb key={`src-${i}`} src={src} alt={`Source ${i + 1}`} label={`Source ${i + 1}`} />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {isAdmin && (
+        <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-5 py-3">
+          <div className="flex items-center justify-between gap-4">
+            <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1 min-w-0 break-words">
+              {item.userEmail && (
+                <div>
+                  <span className="font-medium">User:</span> {item.userEmail}
+                </div>
+              )}
+              {item.ipAddress ? (
+                <div>
+                  <span className="font-medium">IP:</span> {item.ipAddress}
+                </div>
+              ) : (
+                <div className="text-gray-400 dark:text-gray-500">No IP recorded</div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => onDelete(item.id)}
+              className="text-sm font-medium text-red-600 hover:text-red-500"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
+    </article>
+  );
+});
+
+const SkeletonCard = () => (
+  <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+    <div className="aspect-[4/3] animate-pulse bg-gray-200 dark:bg-gray-700" />
+    <div className="p-5 space-y-3">
+      <div className="h-5 w-3/4 animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
+      <div className="h-3 w-1/2 animate-pulse rounded bg-gray-200 dark:bg-gray-700" />
+    </div>
+  </div>
+);
+
+const Lightbox = ({ item, onClose }: { item: MediaItem; onClose: () => void }) => {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={item.prompt}
+      onClick={onClose}
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute top-4 right-4 text-white text-3xl leading-none px-3 py-1"
+        aria-label="Close"
+      >
+        ×
+      </button>
+      <div className="max-w-full max-h-full flex flex-col items-center gap-3" onClick={(e) => e.stopPropagation()}>
+        {item.type === 'video' ? (
+          // eslint-disable-next-line jsx-a11y/media-has-caption
+          <video
+            controls
+            autoPlay
+            preload="none"
+            poster={item.thumbnailUrl || undefined}
+            src={item.url}
+            className="max-w-full max-h-[85vh] bg-black"
+          />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={item.url} alt={item.prompt} decoding="async" className="max-w-full max-h-[85vh] object-contain" />
+        )}
+        <p className="text-sm text-gray-200 max-w-3xl text-center break-words">{item.prompt}</p>
+      </div>
+    </div>
+  );
+};
+
 export default function MediaGallery() {
   const { token, user } = useAuth();
-  const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [blobUrls, setBlobUrls] = useState<Record<string, string>>({});
-  const [thumbnailUrls, setThumbnailUrls] = useState<Record<string, string>>({});
-  const [loadingFullSize, setLoadingFullSize] = useState<Record<string, boolean>>({});
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-
   const isAdmin = useMemo(() => user?.roles?.includes('admin') ?? false, [user?.roles]);
 
-  // Create blob URLs for media with authentication
-  const createBlobUrl = useCallback(async (mediaId: string): Promise<string | null> => {
-    try {
-      const response = await apiFetch(`/api/media/${mediaId}`);
-      if (!response.ok) {
-        console.error(`Failed to fetch media ${mediaId}:`, response.status);
-        return null;
-      }
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      return blobUrl;
-    } catch (err) {
-      console.error(`Error creating blob URL for ${mediaId}:`, err);
-      return null;
-    }
-  }, []);
+  const [items, setItems] = useState<MediaItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [textFilter, setTextFilter] = useState('');
+  const [active, setActive] = useState<MediaItem | null>(null);
 
-  // Create thumbnail blob URLs for media with authentication
-  const createThumbnailUrl = useCallback(async (mediaId: string): Promise<string | null> => {
-    try {
-      const response = await apiFetch(`/api/media/${mediaId}/thumbnail`);
-      if (!response.ok) {
-        console.error(`Failed to fetch thumbnail ${mediaId}:`, response.status);
-        return null;
-      }
-      const blob = await response.blob();
-      // If the backend fell back to returning the full video, don't use it as an image thumbnail
-      if (blob.type.startsWith('video/')) {
-        return null;
-      }
-      const blobUrl = URL.createObjectURL(blob);
-      return blobUrl;
-    } catch (err) {
-      console.error(`Error creating thumbnail URL for ${mediaId}:`, err);
-      return null;
-    }
-  }, []);
+  const pageRef = useRef(0); // last page successfully loaded
+  const inFlightRef = useRef(false);
+  const generationRef = useRef(0); // bumps when the filter changes, invalidating older responses
+  const hasMoreRef = useRef(false);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  // Clean up blob URLs on unmount
-  useEffect(() => {
-    return () => {
-      Object.values(blobUrls).forEach((url) => URL.revokeObjectURL(url));
-      Object.values(thumbnailUrls).forEach((url) => URL.revokeObjectURL(url));
-    };
-  }, [blobUrls, thumbnailUrls]);
-
-  // Load full-size media on-demand when user clicks
-  const loadFullSizeMedia = useCallback(async (mediaId: string) => {
-    // If already loaded, return it
-    if (blobUrls[mediaId]) {
-      return blobUrls[mediaId];
-    }
-
-    // If currently loading, don't start another request
-    if (loadingFullSize[mediaId]) {
-      return null;
-    }
-
-    // Mark as loading
-    setLoadingFullSize(prev => ({ ...prev, [mediaId]: true }));
-
-    try {
-      const blobUrl = await createBlobUrl(mediaId);
-      if (blobUrl) {
-        setBlobUrls(prev => ({ ...prev, [mediaId]: blobUrl }));
-        return blobUrl;
-      }
-    } finally {
-      setLoadingFullSize(prev => ({ ...prev, [mediaId]: false }));
-    }
-
-    return null;
-  }, [blobUrls, loadingFullSize, createBlobUrl]);
-
-  const loadMedia = useCallback(async (pageToLoad: number, isInitial: boolean = false) => {
-    if (isInitial) {
+  const loadPage = useCallback(async (type: TypeFilter, reset: boolean) => {
+    if (reset) {
+      generationRef.current += 1;
+      pageRef.current = 0;
+      inFlightRef.current = false;
       setLoading(true);
       setError(null);
+      setItems([]);
+    } else if (inFlightRef.current || !hasMoreRef.current) {
+      return;
     } else {
       setLoadingMore(true);
     }
-    setActionError(null);
+    inFlightRef.current = true;
+    const generation = generationRef.current;
+    const page = pageRef.current + 1;
 
     try {
-      const response = await apiFetch(`/api/media/list?page=${pageToLoad}&limit=20`);
+      const typeParam = type === 'all' ? '' : `&type=${type}`;
+      const response = await apiFetch(`/api/media/list?page=${page}&limit=${PAGE_SIZE}${typeParam}`);
       const payload = (await response.json()) as MediaListResponse;
-
+      if (generation !== generationRef.current) {
+        return;
+      }
       if (!response.ok || !payload.success || !payload.data?.media) {
-        const message = payload.error?.message || 'Failed to load media history';
-        throw new Error(message);
+        throw new Error(payload.error?.message || 'Failed to load media history');
       }
 
-      const parsed = payload.data.media.reduce<MediaItem[]>((acc, item) => {
-          const id = typeof item.id === 'string' ? item.id : '';
-          if (!id) {
-            return acc;
-          }
-
-          const createdAtRaw = typeof item.createdAt === 'string' ? item.createdAt : String(item.createdAt ?? '');
-          const createdAt = createdAtRaw ? new Date(createdAtRaw).toISOString() : new Date().toISOString();
-
-          const detailsRaw = (item.details ?? null) as Record<string, unknown> | null;
-          const details: MediaDetails | null = detailsRaw
-            ? {
-                mode: isNonEmptyString(detailsRaw.mode) ? detailsRaw.mode : undefined,
-                negativePrompt: isNonEmptyString(detailsRaw.negativePrompt) ? detailsRaw.negativePrompt : null,
-                firstFrame: isNonEmptyString(detailsRaw.firstFrame) ? detailsRaw.firstFrame : null,
-                lastFrame: isNonEmptyString(detailsRaw.lastFrame) ? detailsRaw.lastFrame : null,
-                referenceImages: extractStringArray(detailsRaw.referenceImages),
-                sourceImages: extractStringArray(detailsRaw.sourceImages),
-              }
-            : null;
-
-          acc.push({
-            id,
-            type: item.type === 'video' ? 'video' : 'image',
-            prompt: isNonEmptyString(item.prompt) ? item.prompt : 'Untitled generation',
-            model: isNonEmptyString(item.model) ? item.model : 'Unknown model',
-            createdAt,
-            fileSize: typeof item.fileSize === 'number' ? item.fileSize : 0,
-            mimeType: isNonEmptyString(item.mimeType) ? item.mimeType : '',
-            url: resolveMediaUrl(isNonEmptyString(item.url) ? item.url : `/api/media/${id}`),
-            details,
-            ipAddress: isNonEmptyString(item.ipAddress) ? item.ipAddress : null,
-            userEmail: isNonEmptyString(item.userEmail) ? item.userEmail : null,
-            userId: isNonEmptyString(item.userId) ? item.userId : null,
-          });
-
-          return acc;
-        }, []);
-
-      if (isInitial) {
-        setMediaItems(parsed);
-      } else {
-        setMediaItems(prev => [...prev, ...parsed]);
-      }
-
-      // Check if there are more pages
-      const total = payload.data.total || 0;
-      const currentCount = isInitial ? parsed.length : mediaItems.length + parsed.length;
-      setHasMore(currentCount < total);
-      setPage(pageToLoad);
-
-      // Load thumbnails for the new batch
-      const newThumbnailUrls: Record<string, string> = {};
-      
-      await Promise.all(
-        parsed.map(async (item) => {
-          const thumbnailUrl = await createThumbnailUrl(item.id);
-          if (thumbnailUrl) {
-            newThumbnailUrls[item.id] = thumbnailUrl;
-          }
-        })
-      );
-      
-      setThumbnailUrls(prev => ({ ...prev, ...newThumbnailUrls }));
-
+      const parsed = payload.data.media.map(parseItem).filter((i): i is MediaItem => i !== null);
+      pageRef.current = page;
+      const pages = payload.data.pages ?? Math.ceil((payload.data.total ?? 0) / PAGE_SIZE);
+      const more = page < pages && parsed.length > 0;
+      hasMoreRef.current = more;
+      setHasMore(more);
+      setItems((prev) => {
+        const seen = new Set(prev.map((i) => i.id));
+        return [...prev, ...parsed.filter((i) => !seen.has(i.id))];
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load gallery');
+      if (generation === generationRef.current) {
+        hasMoreRef.current = false;
+        setHasMore(false);
+        setError(err instanceof Error ? err.message : 'Unable to load gallery');
+      }
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (generation === generationRef.current) {
+        inFlightRef.current = false;
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
-  }, [createThumbnailUrl, mediaItems.length]);
+  }, []);
 
   useEffect(() => {
-    void loadMedia(1, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only run on mount
+    hasMoreRef.current = true; // allow the first request of this filter
+    void loadPage(typeFilter, true);
+  }, [typeFilter, loadPage]);
 
-  const handleLoadMore = () => {
-    if (!loadingMore && hasMore) {
-      loadMedia(page + 1, false);
+  const loadMore = useCallback(() => {
+    void loadPage(typeFilter, false);
+  }, [loadPage, typeFilter]);
+
+  // Infinite scroll sentinel (guarded for environments without IntersectionObserver)
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node || !hasMore || typeof IntersectionObserver === 'undefined') {
+      return;
     }
-  };
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          loadMore();
+        }
+      },
+      { rootMargin: '600px 0px' }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, loadMore, items.length]);
 
   const handleDelete = useCallback(
     async (id: string) => {
       if (!isAdmin || !token) {
         return;
       }
-
-      const confirmed = typeof window !== 'undefined' ? window.confirm('Delete this media item? This cannot be undone.') : true;
-      if (!confirmed) {
+      if (typeof window !== 'undefined' && !window.confirm('Delete this media item? This cannot be undone.')) {
         return;
       }
-
       try {
         setActionError(null);
-      const response = await apiFetch(`/api/media/${id}`, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
+        const response = await apiFetch(`/api/media/${id}`, { method: 'DELETE' });
         const payload = (await response.json()) as MediaListResponse;
         if (!response.ok || !payload.success) {
-          const message = payload.error?.message || 'Failed to delete media item';
-          throw new Error(message);
+          throw new Error(payload.error?.message || 'Failed to delete media item');
         }
-
-        setMediaItems((items) => items.filter((item) => item.id !== id));
+        setItems((prev) => prev.filter((item) => item.id !== id));
       } catch (err) {
         setActionError(err instanceof Error ? err.message : 'Unable to delete media item');
       }
@@ -320,9 +452,16 @@ export default function MediaGallery() {
     [isAdmin, token]
   );
 
-  if (loading) {
-    return <LoadingSpinner message="Loading your gallery..." />;
-  }
+  const handleOpen = useCallback((item: MediaItem) => setActive(item), []);
+  const closeLightbox = useCallback(() => setActive(null), []);
+
+  const visibleItems = useMemo(() => {
+    const q = textFilter.trim().toLowerCase();
+    if (!isAdmin || !q) {
+      return items;
+    }
+    return items.filter((i) => i.prompt.toLowerCase().includes(q) || (i.userEmail ?? '').toLowerCase().includes(q));
+  }, [items, isAdmin, textFilter]);
 
   return (
     <div className="space-y-6">
@@ -337,202 +476,79 @@ export default function MediaGallery() {
             <span className="font-semibold">Privacy Notice:</span> IP addresses are logged for abuse prevention only and are visible to administrators. This data helps identify and prevent misuse of the service.
           </p>
         </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <div className="inline-flex rounded-lg border border-gray-300 dark:border-gray-600 overflow-hidden" role="group" aria-label="Filter by type">
+            {FILTERS.map((f) => (
+              <button
+                key={f.value}
+                type="button"
+                onClick={() => setTypeFilter(f.value)}
+                aria-pressed={typeFilter === f.value}
+                className={`px-4 py-1.5 text-sm font-medium ${
+                  typeFilter === f.value
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          {isAdmin && (
+            <input
+              type="search"
+              value={textFilter}
+              onChange={(e) => setTextFilter(e.target.value)}
+              placeholder="Filter loaded items by student email or prompt"
+              aria-label="Filter by student email or prompt"
+              className="flex-1 min-w-[16rem] rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white px-3 py-1.5 text-sm"
+            />
+          )}
+        </div>
       </div>
 
-      {error && (
-        <div className="border border-red-200 bg-red-50 text-red-700 rounded-lg p-4 text-sm">{error}</div>
-      )}
-
+      {error && <div className="border border-red-200 bg-red-50 text-red-700 rounded-lg p-4 text-sm">{error}</div>}
       {actionError && (
         <div className="border border-yellow-200 bg-yellow-50 text-yellow-800 rounded-lg p-4 text-sm">{actionError}</div>
       )}
 
-      {mediaItems.length === 0 && !error ? (
+      {loading ? (
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3" aria-busy="true" aria-label="Loading gallery">
+          {Array.from({ length: 6 }, (_, i) => (
+            <SkeletonCard key={i} />
+          ))}
+        </div>
+      ) : visibleItems.length === 0 && !error ? (
         <div className="border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 rounded-xl p-8 text-center text-gray-600 dark:text-gray-300">
-          No media has been generated yet. Create an image or video to see it appear here automatically.
+          {items.length > 0
+            ? 'No loaded items match your filter.'
+            : 'No media has been generated yet. Create an image or video to see it appear here automatically.'}
         </div>
       ) : (
-        <>
-          <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-            {mediaItems.map((item) => {
-            const referenceImages = item.details?.referenceImages ?? [];
-            const sourceImages = item.details?.sourceImages ?? [];
-            const firstFrame = item.details?.firstFrame;
-            const lastFrame = item.details?.lastFrame;
-
-            return (
-              <article
-                key={item.id}
-                className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm flex flex-col"
-              >
-                <div className="relative bg-gray-50 dark:bg-gray-800 cursor-pointer group" onClick={async () => {
-                  // Load full-size media on-demand
-                  const fullUrl = await loadFullSizeMedia(item.id);
-                  window.open(fullUrl || item.url, '_blank');
-                }}>
-                  {item.type === 'image' ? (
-                    <div className="relative">
-                      <img 
-                        src={thumbnailUrls[item.id] || blobUrls[item.id] || item.url} 
-                        alt={item.prompt} 
-                        className="w-full object-contain max-h-72 bg-black" 
-                        loading="lazy" 
-                      />
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                        <span className="opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-gray-800 text-gray-900 dark:text-white px-4 py-2 rounded-lg shadow-lg text-sm font-medium">
-                          Click to view full size
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="relative">
-                      {thumbnailUrls[item.id] ? (
-                        <img
-                          src={thumbnailUrls[item.id]}
-                          alt={item.prompt}
-                          className="w-full object-contain max-h-72 bg-black"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <video
-                          preload="metadata"
-                          className="w-full max-h-72 bg-black pointer-events-none"
-                          src={blobUrls[item.id] || item.url}
-                          muted
-                        />
-                      )}
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                        <span className="opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-gray-800 text-gray-900 dark:text-white px-4 py-2 rounded-lg shadow-lg text-sm font-medium">
-                          Click to view full video
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  <span className="absolute top-3 left-3 inline-flex items-center rounded-full bg-blue-600/90 text-white text-xs font-semibold px-3 py-1 uppercase tracking-wide">
-                    {item.type}
-                  </span>
-                </div>
-
-                <div className="flex-1 p-5 space-y-4">
-                  <div>
-                    <TruncatedPrompt prompt={item.prompt} />
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Generated {formatDate(item.createdAt)}</p>
-                  </div>
-
-                  <div className="text-sm text-gray-700 dark:text-gray-300 space-y-1">
-                    <p>
-                      <span className="font-medium">Model:</span> {item.model}
-                    </p>
-                    {item.details?.mode && (
-                      <p>
-                        <span className="font-medium">Mode:</span> {item.details.mode}
-                      </p>
-                    )}
-                    {isNonEmptyString(item.details?.negativePrompt) && (
-                      <div className="text-sm">
-                        <span className="font-medium">Negative prompt:</span>{' '}
-                        {item.details.negativePrompt.length > 80 ? (
-                          <>
-                            {item.details.negativePrompt.slice(0, 80)}...
-                            <span className="text-xs text-gray-500 dark:text-gray-400"> (truncated)</span>
-                          </>
-                        ) : (
-                          item.details.negativePrompt
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {(referenceImages.length > 0 || sourceImages.length > 0 || firstFrame || lastFrame) && (
-                    <div className="space-y-3">
-                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Reference imagery</h3>
-                      <div className="flex flex-wrap gap-3">
-                        {firstFrame && (
-                          <div className="w-20 h-20 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
-                            <img src={firstFrame} alt="First frame" className="w-full h-full object-cover" loading="lazy" />
-                            <p className="text-[10px] text-center text-gray-500 dark:text-gray-400 mt-1">First</p>
-                          </div>
-                        )}
-                        {lastFrame && (
-                          <div className="w-20 h-20 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700">
-                            <img src={lastFrame} alt="Last frame" className="w-full h-full object-cover" loading="lazy" />
-                            <p className="text-[10px] text-center text-gray-500 dark:text-gray-400 mt-1">Last</p>
-                          </div>
-                        )}
-                        {referenceImages.map((src, index) => (
-                          <div
-                            key={`reference-${item.id}-${index}`}
-                            className="w-20 h-20 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700"
-                          >
-                            <img src={src} alt={`Reference ${index + 1}`} className="w-full h-full object-cover" loading="lazy" />
-                            <p className="text-[10px] text-center text-gray-500 dark:text-gray-400 mt-1">Ref {index + 1}</p>
-                          </div>
-                        ))}
-                        {sourceImages.map((src, index) => (
-                          <div
-                            key={`source-${item.id}-${index}`}
-                            className="w-20 h-20 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700"
-                          >
-                            <img src={src} alt={`Source ${index + 1}`} className="w-full h-full object-cover" loading="lazy" />
-                            <p className="text-[10px] text-center text-gray-500 dark:text-gray-400 mt-1">Source {index + 1}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {isAdmin && (
-                  <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-5 py-3">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
-                        {item.userEmail && (
-                          <div>
-                            <span className="font-medium">User:</span> {item.userEmail}
-                          </div>
-                        )}
-                        {item.ipAddress ? (
-                          <div>
-                            <span className="font-medium">IP:</span> {item.ipAddress}
-                          </div>
-                        ) : (
-                          <div className="text-gray-400 dark:text-gray-500">No IP recorded</div>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void handleDelete(item.id);
-                        }}
-                        className="text-sm font-medium text-red-600 hover:text-red-500"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </article>
-            );
-          })}
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+          {visibleItems.map((item) => (
+            <MediaCard key={item.id} item={item} isAdmin={isAdmin} onOpen={handleOpen} onDelete={handleDelete} />
+          ))}
         </div>
-
-        {hasMore && (
-          <div className="flex flex-col items-center gap-3 py-8">
-            <div className="text-sm text-gray-600 dark:text-gray-400">
-              Showing {mediaItems.length} items
-            </div>
-            <button
-              type="button"
-              onClick={handleLoadMore}
-              disabled={loadingMore}
-              className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium px-8 py-3 rounded-lg shadow-sm transition-colors"
-            >
-              {loadingMore ? 'Loading...' : 'Load More'}
-            </button>
-          </div>
-        )}
-      </>
       )}
+
+      {!loading && hasMore && (
+        <div className="flex flex-col items-center gap-3 py-8">
+          <div ref={sentinelRef} className="h-px w-full" aria-hidden="true" />
+          <div className="text-sm text-gray-600 dark:text-gray-400">Showing {items.length} items</div>
+          <button
+            type="button"
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium px-8 py-3 rounded-lg shadow-sm transition-colors"
+          >
+            {loadingMore ? 'Loading...' : 'Load More'}
+          </button>
+        </div>
+      )}
+
+      {active && <Lightbox item={active} onClose={closeLightbox} />}
     </div>
   );
 }

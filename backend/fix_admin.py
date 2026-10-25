@@ -98,7 +98,7 @@ def main():
     user = UserManager.get_user_by_email(admin_email)
 
     if user:
-        print(f"   ✓ Admin user verified:")
+        print("   ✓ Admin user verified:")
         print(f"     Email: {user.email}")
         print(f"     Is Admin: {user.is_admin}")
         print(f"     Is Active: {user.is_active}")
@@ -109,17 +109,17 @@ def main():
         if user.password_hash and UserManager.verify_password(
             admin_password, user.password_hash
         ):
-            print(f"     Password Verification: ✓ CORRECT")
+            print("     Password Verification: ✓ CORRECT")
         else:
-            print(f"     Password Verification: ✗ FAILED")
+            print("     Password Verification: ✗ FAILED")
             return 1
 
         print("\n" + "=" * 70)
         print("SUCCESS! Admin user is ready.")
         print("=" * 70)
-        print(f"\nYou can now login with:")
+        print("\nYou can now login with:")
         print(f"  Email: {admin_email}")
-        print(f"  Password: [from your .env file]")
+        print("  Password: [from your .env file]")
         print("\nRestart your backend if it's already running:")
         print("  docker-compose restart backend")
         print("  # or")

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, ChangeEvent, useEffect } from 'react';
+import { readFileAsDataUrl } from '@/lib/utils/files';
 
 interface MultiFileUploadProps {
   label?: string;
@@ -52,24 +53,8 @@ export default function MultiFileUpload({
     const names = selectedFiles.map(f => f.name);
     setFileNames(names);
 
-    const base64Array: string[] = [];
-    const previewArray: string[] = [];
-
-    for (const file of selectedFiles) {
-      const reader = new FileReader();
-      
-      await new Promise<void>((resolve) => {
-        reader.onloadend = () => {
-          const result = reader.result as string;
-          base64Array.push(result);
-          if (preview) {
-            previewArray.push(result);
-          }
-          resolve();
-        };
-        reader.readAsDataURL(file);
-      });
-    }
+    const base64Array = await Promise.all(selectedFiles.map(readFileAsDataUrl));
+    const previewArray = preview ? base64Array : [];
 
     if (preview) {
       setPreviews(previewArray);
