@@ -9,10 +9,16 @@ import ChatSessionList from '@/components/text/ChatSessionList';
 import LibrarySelector from '@/components/text/LibrarySelector';
 import MessageList from '@/components/text/MessageList';
 import SaveLibraryModal from '@/components/text/SaveLibraryModal';
-import VariableInputs from '@/components/text/VariableInputs';
+import PlaceholderFields from '@/components/shared/PlaceholderFields';
 import { formatDateTime } from '@/lib/utils/files';
 import { templateAPI, systemPromptAPI, textGenerationAPI, chatAPI } from '@/lib/text/api';
-import { extractVariables, isTemplateFilled, getUnfilledVariables } from '@/lib/text/utils';
+import {
+  extractVariables,
+  getUnfilledVariables,
+  pickVariableValues,
+  preparePrompt,
+  resolvePrompt,
+} from '@/lib/text/utils';
 import type {
   PromptTemplate,
   SystemPrompt,
@@ -68,28 +74,23 @@ export default function TextGenerationPage() {
   // Compute if system prompt can be edited (no messages sent yet)
   const canEditSystemPrompt = messages.length === 0;
 
-  // Extract variables from user message
+  // Extract variables from user message and system prompt. Values are shared:
+  // PlaceholderFields prefills them from the user's saved placeholders.
   const detectedVariables = useMemo(() => extractVariables(userMessage), [userMessage]);
+  const systemPromptVariables = useMemo(() => extractVariables(systemPromptText), [systemPromptText]);
+  // Once a chat has messages its system prompt is fixed, so its placeholders no longer matter.
+  const systemPromptLocked = mode === 'chat' && currentSession !== null && !canEditSystemPrompt;
 
-  // Update variable values when detected variables change
-  useEffect(() => {
-    setVariableValues(prev => {
-      const newValues = { ...prev };
-      // Add new variables
-      detectedVariables.forEach(v => {
-        if (!(v in newValues)) {
-          newValues[v] = '';
-        }
-      });
-      // Remove variables that are no longer in the template
-      Object.keys(newValues).forEach(k => {
-        if (!detectedVariables.includes(k)) {
-          delete newValues[k];
-        }
-      });
-      return newValues;
-    });
-  }, [detectedVariables]);
+  /** Resolve {{placeholders}} in the system prompt; returns null (and sets an error) if some are empty. */
+  const resolveSystemPrompt = (): string | null | undefined => {
+    if (!systemPromptText) return undefined;
+    const unfilled = getUnfilledVariables(systemPromptText, variableValues);
+    if (unfilled.length > 0) {
+      setError(`Please fill in the system prompt placeholders: ${unfilled.map(v => `{{${v}}}`).join(', ')}`);
+      return null;
+    }
+    return resolvePrompt(systemPromptText, variableValues);
+  };
 
   // Load templates and system prompts
   useEffect(() => {
@@ -155,10 +156,6 @@ export default function TextGenerationPage() {
     void loadMessages();
   }, [currentSession]);
 
-  const handleVariableChange = useCallback((variable: string, value: string) => {
-    setVariableValues(prev => ({ ...prev, [variable]: value }));
-  }, []);
-
   // Handle template selection
   const handleTemplateSelect = useCallback((templateId: string) => {
     if (templateId === '') {
@@ -197,23 +194,30 @@ export default function TextGenerationPage() {
     }
 
     // Check if all variables are filled
-    if (detectedVariables.length > 0 && !isTemplateFilled(userMessage, variableValues)) {
-      const unfilled = getUnfilledVariables(userMessage, variableValues);
+    const unfilled = getUnfilledVariables(userMessage, variableValues);
+    if (unfilled.length > 0) {
       setError(`Please fill in all variables: ${unfilled.join(', ')}`);
       return;
     }
+
+    const resolvedSystemPrompt = resolveSystemPrompt();
+    if (resolvedSystemPrompt === null) return;
 
     setLoading(true);
     setError(null);
     setResponse('');
 
+    // The raw message + values are sent; the server fills the user message
+    // (and stores both in the history). The system prompt is resolved here.
+    const messageValues = pickVariableValues(userMessage, variableValues);
+
     try {
       const result = await textGenerationAPI.generate({
         userMessage,
-        systemPrompt: systemPromptText || undefined,
+        systemPrompt: resolvedSystemPrompt || undefined,
         systemPromptId: selectedSystemPrompt?.id,
         templateId: selectedTemplate?.id,
-        variableValues: Object.keys(variableValues).length > 0 ? variableValues : undefined,
+        variableValues: Object.keys(messageValues).length > 0 ? messageValues : undefined,
         model: textModelId,
       });
 
@@ -227,13 +231,16 @@ export default function TextGenerationPage() {
 
   // Handle chat session creation
   const handleCreateSession = async () => {
+    const resolvedSystemPrompt = resolveSystemPrompt();
+    if (resolvedSystemPrompt === null) return;
+
     setLoading(true);
     setError(null);
 
     try {
       const session = await chatAPI.createSession({
         name: `Chat ${formatDateTime(new Date())}`,
-        systemPrompt: systemPromptText || undefined,
+        systemPrompt: resolvedSystemPrompt || undefined,
         systemPromptId: selectedSystemPrompt?.id,
       });
 
@@ -251,6 +258,13 @@ export default function TextGenerationPage() {
   const handleSendMessage = async () => {
     if (!currentSession || !userMessage.trim()) return;
 
+    // Chat messages are sent as-is, so resolve {{placeholders}} here.
+    const { prompt: resolvedMessage, error: placeholderError } = preparePrompt(userMessage, variableValues);
+    if (placeholderError) {
+      setError(placeholderError);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -260,13 +274,13 @@ export default function TextGenerationPage() {
         id: `temp-${Date.now()}`,
         sessionId: currentSession.id,
         role: 'user',
-        content: userMessage,
+        content: resolvedMessage,
         createdAt: new Date().toISOString(),
       };
       setMessages(prev => [...prev, tempUserMessage]);
 
       const message = await chatAPI.sendMessage(currentSession.id, {
-        message: userMessage,
+        message: resolvedMessage,
         model: textModelId,
       });
 
@@ -278,7 +292,14 @@ export default function TextGenerationPage() {
       ]);
 
       setUserMessage('');
-      setVariableValues({});
+      // Forget this message's values so saved defaults prefill the next one.
+      setVariableValues(prev => {
+        const next = { ...prev };
+        detectedVariables.forEach(v => {
+          delete next[v];
+        });
+        return next;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send message');
       // Remove temp message on error
@@ -339,9 +360,12 @@ export default function TextGenerationPage() {
       return;
     }
 
+    const resolvedSystemPrompt = resolveSystemPrompt();
+    if (resolvedSystemPrompt === null) return;
+
     try {
       const updatedSession = await chatAPI.updateSession(currentSession.id, {
-        systemPrompt: systemPromptText || undefined,
+        systemPrompt: resolvedSystemPrompt || undefined,
       });
 
       setChatSessions(prev =>
@@ -404,6 +428,42 @@ export default function TextGenerationPage() {
       setSelectedTemplate(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update template');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteTemplate = async () => {
+    if (!selectedTemplate) return;
+    if (!confirm(`Delete template "${selectedTemplate.name}"?`)) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      await templateAPI.delete(selectedTemplate.id);
+      setTemplates(prev => prev.filter(t => t.id !== selectedTemplate.id));
+      setSelectedTemplate(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete template');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteSystemPrompt = async () => {
+    if (!selectedSystemPrompt) return;
+    if (!confirm(`Delete system prompt "${selectedSystemPrompt.name}"?`)) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      await systemPromptAPI.delete(selectedSystemPrompt.id);
+      setSystemPrompts(prev => prev.filter(p => p.id !== selectedSystemPrompt.id));
+      setSelectedSystemPrompt(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete system prompt');
     } finally {
       setLoading(false);
     }
@@ -564,6 +624,7 @@ export default function TextGenerationPage() {
             onSelect={handleSystemPromptSelect}
             onSaveNew={() => setShowSaveSystemPromptModal(true)}
             onUpdate={() => void handleUpdateSystemPrompt()}
+            onDelete={() => void handleDeleteSystemPrompt()}
           />
 
           <LibrarySelector
@@ -577,6 +638,7 @@ export default function TextGenerationPage() {
             onSelect={handleTemplateSelect}
             onSaveNew={() => setShowSaveTemplateModal(true)}
             onUpdate={() => void handleUpdateTemplate()}
+            onDelete={() => void handleDeleteTemplate()}
           />
 
           {/* Chat Sessions (only in chat mode) */}
@@ -606,8 +668,18 @@ export default function TextGenerationPage() {
               onChange={(e) => setSystemPromptText(e.target.value)}
               placeholder="e.g., You are a helpful assistant that explains things simply"
               rows={3}
-              disabled={mode === 'chat' && currentSession !== null && !canEditSystemPrompt}
+              disabled={systemPromptLocked}
             />
+            {!systemPromptLocked && (
+              <PlaceholderFields
+                text={systemPromptText}
+                values={variableValues}
+                onChange={setVariableValues}
+                disabled={loading}
+                title="System Prompt Placeholders"
+                className="mt-3"
+              />
+            )}
             {mode === 'chat' && currentSession && (
               <>
                 {canEditSystemPrompt ? (
@@ -662,10 +734,14 @@ export default function TextGenerationPage() {
                         }
                       }}
                     />
-                    <VariableInputs
-                      variables={detectedVariables}
+                    <PlaceholderFields
+                      text={userMessage}
                       values={variableValues}
-                      onChange={handleVariableChange}
+                      onChange={setVariableValues}
+                      disabled={loading}
+                      exclude={systemPromptLocked ? undefined : systemPromptVariables}
+                      title="Template Variables"
+                      className="mt-4"
                     />
                     <Button
                       onClick={() => void handleSendMessage()}
@@ -696,11 +772,15 @@ export default function TextGenerationPage() {
                   disabled={loading}
                 />
 
-                <VariableInputs
-                  variables={detectedVariables}
+                <PlaceholderFields
+                  text={userMessage}
                   values={variableValues}
-                  onChange={handleVariableChange}
-                    />
+                  onChange={setVariableValues}
+                  disabled={loading}
+                  exclude={systemPromptVariables}
+                  title="Template Variables"
+                  className="mt-4"
+                />
 
                 <Button
                   onClick={() => void handleGenerate()}

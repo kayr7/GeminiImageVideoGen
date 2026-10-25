@@ -6,6 +6,7 @@ import { formatDateTime } from '@/lib/utils/files';
 import { apiFetch } from '@/lib/utils/apiClient';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
+import PlaceholdersCard from '@/components/profile/PlaceholdersCard';
 
 interface UserInfo {
   user: {
@@ -369,6 +370,9 @@ export default function ProfilePage() {
           </p>
         </div>
       </div>
+
+      {/* Saved placeholder values */}
+      <PlaceholdersCard />
 
       {/* Recent Generations */}
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">

@@ -11,6 +11,8 @@ import MultiFileUpload from '../ui/MultiFileUpload';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import QuotaDisplay from './QuotaDisplay';
 import TemplateSelector from '../shared/TemplateSelector';
+import PlaceholderFields from '../shared/PlaceholderFields';
+import { preparePrompt } from '@/lib/templates/utils';
 import { CONSTANTS } from '@/lib/utils/constants';
 import { useAuth } from '@/lib/context/AuthContext';
 import { apiFetch, resolveApiUrl } from '@/lib/utils/apiClient';
@@ -27,6 +29,17 @@ type VideoJob = {
   error?: string;
   [key: string]: unknown;
 };
+
+const MODE_LABELS: Record<string, string> = {
+  text: 'Text-to-Video',
+  'text-to-video': 'Text-to-Video',
+  'image-to-video': 'Image-to-Video',
+  'first-last-frame': 'First + Last Frame',
+  'reference-to-video': 'Reference Images',
+  animate: 'Animate Image',
+};
+
+const modeLabel = (mode?: string) => (mode && MODE_LABELS[mode]) || 'Image-to-Video';
 
 export default function VideoGenerator() {
   const { token, config, initialising } = useAuth();
@@ -50,15 +63,15 @@ export default function VideoGenerator() {
   }, [availableVideoModels, videoModelAvailability?.default]);
 
   const [prompt, setPrompt] = useState('');
+  const [placeholderValues, setPlaceholderValues] = useState<Record<string, string>>({});
   const [negativePrompt, setNegativePrompt] = useState('');
   const [model, setModel] = useState('');
   const [resolution, setResolution] = useState('720p');
   const [aspectRatio, setAspectRatio] = useState('16:9');
-  const [duration, setDuration] = useState('4');
+  const [duration, setDuration] = useState('8');
 
-  // Image options per Veo documentation
-  // NOTE: Cannot combine last frame with reference images (API limitation)
-  // Valid: first+last frames OR first frame+reference images OR reference images only
+  // Image inputs (Gemini Omni): first frame, last frame and up to 3 reference images.
+  // They can be combined; the backend tells the model which image plays which role.
   const [firstFrameInput, setFirstFrameInput] = useState<string | null>(null); // Starting frame (input)
   const [lastFrameInput, setLastFrameInput] = useState<string | null>(null); // Ending frame (input)
   const [referenceImages, setReferenceImages] = useState<string[]>([]); // Style/content guidance (max 3)
@@ -129,6 +142,54 @@ export default function VideoGenerator() {
     return selectedModel.capabilities.video_reference_images.supports_end_frame;
   }, [selectedModel]);
 
+  const supportsReferenceImages = useMemo(() => {
+    const refs = selectedModel?.capabilities?.video_reference_images;
+    if (!refs?.enabled) return false;
+    return (refs.supports_reference_images ?? true) && refs.max > 0;
+  }, [selectedModel]);
+
+  const resolutionOptions = useMemo(
+    () => selectedModel?.capabilities?.resolutions ?? [],
+    [selectedModel]
+  );
+  const aspectRatioOptions = useMemo(
+    () => selectedModel?.capabilities?.aspect_ratios ?? [],
+    [selectedModel]
+  );
+  const durationOptions = useMemo(
+    () => selectedModel?.capabilities?.durations ?? [],
+    [selectedModel]
+  );
+  const supportsNegativePrompt = selectedModel?.capabilities?.supports_negative_prompt !== false;
+  const negativePromptViaPrompt = selectedModel?.capabilities?.negative_prompt_mode === 'prompt';
+
+  // Keep the selects on values the selected model supports (fall back to its defaults).
+  useEffect(() => {
+    const caps = selectedModel?.capabilities;
+    if (!caps) return;
+    setResolution((current) =>
+      !caps.resolutions?.length || caps.resolutions.includes(current)
+        ? current
+        : caps.default_resolution && caps.resolutions.includes(caps.default_resolution)
+        ? caps.default_resolution
+        : caps.resolutions[0]
+    );
+    setAspectRatio((current) =>
+      !caps.aspect_ratios?.length || caps.aspect_ratios.includes(current)
+        ? current
+        : caps.aspect_ratios[0]
+    );
+    setDuration((current) => {
+      if (!caps.durations?.length) return '';
+      if (caps.durations.includes(Number(current))) return current;
+      const fallback =
+        caps.default_duration && caps.durations.includes(caps.default_duration)
+          ? caps.default_duration
+          : caps.durations[0];
+      return String(fallback);
+    });
+  }, [selectedModel]);
+
   const videoGenerationEnabled = config ? config.features.videoGeneration : true;
 
   useEffect(() => {
@@ -136,7 +197,10 @@ export default function VideoGenerator() {
       setFirstFrameInput(null);
       setLastFrameInput(null);
     }
-  }, [supportsAdvancedFrames]);
+    if (!supportsReferenceImages) {
+      setReferenceImages([]);
+    }
+  }, [supportsAdvancedFrames, supportsReferenceImages]);
 
   const loadJobHistory = useCallback(async () => {
     if (!token) {
@@ -161,11 +225,25 @@ export default function VideoGenerator() {
       return undefined;
     }
     try {
-      const response = await apiFetch(`/api/video/jobs/${jobId}`);
-      const data = await response.json();
-      if (data.success && data.data) {
-        const updatedJob = data.data as VideoJob;
-        setJobHistory((prev) => prev.map((job) => (job.id === jobId ? updatedJob : job)));
+      // /status is the endpoint that actually asks Google and finalises the job.
+      const response = await apiFetch(`/api/video/status?jobId=${encodeURIComponent(jobId)}`);
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        setJobHistory((prev) =>
+          prev.map((job) =>
+            job.id === jobId
+              ? { ...job, error: getApiErrorMessage(data, 'Could not check the job status') }
+              : job
+          )
+        );
+        return undefined;
+      }
+      if (data?.success && data.data) {
+        const status = data.data as VideoJob;
+        const updatedJob: VideoJob = { ...status, id: jobId };
+        setJobHistory((prev) =>
+          prev.map((job) => (job.id === jobId ? { ...job, ...status, id: job.id } : job))
+        );
 
         if (updatedJob.status === 'completed' && updatedJob.videoUrl) {
           setGeneratedVideo(resolveApiUrl(updatedJob.videoUrl));
@@ -212,9 +290,15 @@ export default function VideoGenerator() {
 
     for (let attempts = 0; attempts < maxAttempts; attempts++) {
       const response = await apiFetch(`/api/video/status?jobId=${encodeURIComponent(jobId)}`);
-      const data = await response.json();
+      const data = await response.json().catch(() => null);
 
       if (!response.ok) {
+        // 502-504: the video service was briefly unreachable; the job keeps running.
+        if ([502, 503, 504].includes(response.status)) {
+          setStatusMessage(`Waiting for the video service... (${attempts * 10}s elapsed)`);
+          await new Promise((resolve) => setTimeout(resolve, 10000));
+          continue;
+        }
         throw new Error(getApiErrorMessage(data, 'Failed to check video status'));
       }
 
@@ -250,6 +334,17 @@ export default function VideoGenerator() {
       return;
     }
 
+    // Fill {{placeholders}} typed into the prompt (or coming from a template).
+    const { prompt: resolvedPrompt, error: placeholderError } = preparePrompt(
+      prompt,
+      placeholderValues,
+      CONSTANTS.MAX_PROMPT_LENGTH,
+    );
+    if (placeholderError) {
+      setError(placeholderError);
+      return;
+    }
+
     if (!model) {
       setError('No video model is currently available.');
       return;
@@ -265,12 +360,12 @@ export default function VideoGenerator() {
     try {
       // Always use /generate endpoint with appropriate fields
       const requestBody: Record<string, unknown> = {
-        prompt: prompt.trim(),
+        prompt: resolvedPrompt.trim(),
         model,
       };
       
       // Add optional fields if provided
-      if (negativePrompt.trim()) {
+      if (negativePrompt.trim() && supportsNegativePrompt) {
         requestBody.negativePrompt = negativePrompt.trim();
       }
       
@@ -282,13 +377,13 @@ export default function VideoGenerator() {
         requestBody.lastFrame = lastFrameInput;
       }
       
-      if (referenceImages.length > 0) {
+      if (referenceImages.length > 0 && supportsReferenceImages) {
         requestBody.referenceImages = referenceImages.slice(0, maxReferenceImages);
       }
 
-      if (resolution) requestBody.resolution = resolution;
-      if (aspectRatio) requestBody.aspectRatio = aspectRatio;
-      if (duration) requestBody.durationSeconds = duration;
+      if (resolution && resolutionOptions.includes(resolution)) requestBody.resolution = resolution;
+      if (aspectRatio && aspectRatioOptions.includes(aspectRatio)) requestBody.aspectRatio = aspectRatio;
+      if (duration && durationOptions.length > 0) requestBody.durationSeconds = duration;
       
       const response = await apiFetch('/api/video/generate', {
         method: 'POST',
@@ -304,7 +399,7 @@ export default function VideoGenerator() {
 
       // Start polling if we got a job ID
       if (data.data.jobId) {
-        setStatusMessage('Video generation started. This will take several minutes...');
+        setStatusMessage('Video generation started. This usually takes under a minute...');
         await pollVideoStatus(data.data.jobId);
       } else if (data.data.videoUrl) {
         setGeneratedVideo(data.data.videoUrl);
@@ -415,13 +510,22 @@ export default function VideoGenerator() {
             maxLength={CONSTANTS.MAX_PROMPT_LENGTH}
           />
 
+          <PlaceholderFields
+            text={prompt}
+            values={placeholderValues}
+            onChange={setPlaceholderValues}
+            disabled={loading}
+          />
+
           <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
             <button
               type="button"
               onClick={() => setShowAdvancedOptions(!showAdvancedOptions)}
               className="flex items-center justify-between w-full text-left"
             >
-              <span className="font-semibold text-sm">Advanced Options (Images, Negative Prompt)</span>
+              <span className="font-semibold text-sm">
+                Advanced Options (Images{supportsNegativePrompt ? ', Negative Prompt' : ''})
+              </span>
               <svg
                 className={`w-5 h-5 transition-transform ${showAdvancedOptions ? 'rotate-180' : ''}`}
                 fill="none"
@@ -439,28 +543,24 @@ export default function VideoGenerator() {
                     <strong>Image Options:</strong>
                   </p>
                   <ul className="text-xs text-blue-600 dark:text-blue-400 space-y-1">
-                    <li>• <strong>First Frame:</strong> Image becomes the starting frame of the video</li>
-                    <li>• <strong>Last Frame:</strong> Image becomes the ending frame of the video</li>
-                    <li>• <strong>Reference Images:</strong> Up to 3 images guide the visual style/content (not used as frames)</li>
+                    <li>• <strong>First Frame:</strong> The video starts from this image</li>
+                    <li>• <strong>Last Frame:</strong> The video ends on this image (best together with a first frame)</li>
+                    {supportsReferenceImages && (
+                      <li>
+                        • <strong>Reference Images:</strong> Up to {maxReferenceImages} images of subjects, characters or
+                        style (not used as frames)
+                      </li>
+                    )}
+                    <li>• Options can be combined; describe in the prompt what should happen</li>
                   </ul>
-                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 font-semibold">
-                    ⚠️ Cannot combine last frame with reference images
-                  </p>
                 </div>
 
                 {!supportsAdvancedFrames && (
                   <div className="p-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded text-xs text-amber-800 dark:text-amber-200">
-                    ⚠️ Advanced image features (reference images, last frame) are not supported by the selected model
+                    ⚠️ Image inputs are not supported by the selected model
                     {referenceCapableNames.length > 0 && (
                       <> — try <strong>{referenceCapableNames.join(', ')}</strong></>
                     )}.
-                  </div>
-                )}
-
-                {lastFrameInput && referenceImages.length > 0 && (
-                  <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded text-xs text-red-800 dark:text-red-200">
-                    <strong>⚠️ Conflict:</strong> You cannot use last frame and reference images together.
-                    Please remove one or the other before generating.
                   </div>
                 )}
 
@@ -469,11 +569,11 @@ export default function VideoGenerator() {
                   accept="image/*"
                   onFileSelect={(file, base64) => setFirstFrameInput(base64 || null)}
                   preview
-                  disabled={!supportsAdvancedFrames}
+                  disabled={!supportsAdvancedFrames || !supportsStartFrame}
                   helperText={
                     !supportsStartFrame
                       ? 'First frame is not supported by this model'
-                      : 'Can be used with last frame OR reference images'
+                      : 'The video starts from this image'
                   }
                 />
 
@@ -482,42 +582,41 @@ export default function VideoGenerator() {
                   accept="image/*"
                   onFileSelect={(file, base64) => setLastFrameInput(base64 || null)}
                   preview
-                  disabled={!supportsAdvancedFrames || referenceImages.length > 0}
+                  disabled={!supportsAdvancedFrames || !supportsEndFrame}
                   helperText={
                     !supportsEndFrame
                       ? 'Last frame is not supported by this model'
-                      : referenceImages.length > 0
-                      ? 'Disabled: Cannot use with reference images'
-                      : 'Works best with first frame for interpolation'
+                      : 'Works best with a first frame: describe the transition in the prompt'
                   }
                 />
 
-                <div>
-                  <MultiFileUpload
-                    label="Reference Images (Optional)"
-                    accept="image/*"
-                    maxFiles={3}
-                    onFilesSelect={(files, base64Array) => setReferenceImages(base64Array)}
-                    preview
-                    disabled={!supportsAdvancedFrames || !!lastFrameInput}
+                {supportsReferenceImages && (
+                  <div>
+                    <MultiFileUpload
+                      label="Reference Images (Optional)"
+                      accept="image/*"
+                      maxFiles={maxReferenceImages}
+                      onFilesSelect={(files, base64Array) => setReferenceImages(base64Array)}
+                      preview
+                      helperText={`Up to ${maxReferenceImages} images of subjects, characters or style (not used as frames)`}
+                    />
+                  </div>
+                )}
+
+                {supportsNegativePrompt && (
+                  <Textarea
+                    label="Negative Prompt (Optional)"
+                    placeholder="Describe what you DON'T want in the video..."
+                    value={negativePrompt}
+                    onChange={(e) => setNegativePrompt(e.target.value)}
+                    rows={2}
                     helperText={
-                      !supportsAdvancedFrames
-                        ? 'Reference images are not supported by this model'
-                        : lastFrameInput
-                        ? 'Disabled: Cannot use with last frame'
-                        : 'Up to 3 images to guide visual style and content (not used as frames)'
+                      negativePromptViaPrompt
+                        ? 'Added to the end of your prompt as "Avoid: …"'
+                        : 'Specify elements to avoid in the generated video'
                     }
                   />
-                </div>
-
-                <Textarea
-                  label="Negative Prompt (Optional)"
-                  placeholder="Describe what you DON'T want in the video..."
-                  value={negativePrompt}
-                  onChange={(e) => setNegativePrompt(e.target.value)}
-                  rows={2}
-                  helperText="Specify elements to avoid in the generated video"
-                />
+                )}
               </div>
             )}
           </div>
@@ -579,34 +678,29 @@ export default function VideoGenerator() {
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-4 mt-4">
+          <div className={`grid gap-4 mt-4 ${durationOptions.length > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}>
             <Select
               label="Resolution"
               value={resolution}
               onChange={(e) => setResolution(e.target.value)}
-              options={(selectedModel?.capabilities?.resolutions || ['720p', '1080p']).map(r => ({
-                value: r,
-                label: r
-              }))}
+              options={resolutionOptions.map((r) => ({ value: r, label: r }))}
+              disabled={resolutionOptions.length === 0}
             />
             <Select
               label="Aspect Ratio"
               value={aspectRatio}
               onChange={(e) => setAspectRatio(e.target.value)}
-              options={(selectedModel?.capabilities?.aspect_ratios || ['16:9', '9:16']).map(r => ({
-                value: r,
-                label: r
-              }))}
+              options={aspectRatioOptions.map((r) => ({ value: r, label: r }))}
+              disabled={aspectRatioOptions.length === 0}
             />
-            <Select
-              label="Duration (s)"
-              value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-              options={(selectedModel?.capabilities?.durations || [4, 6, 8]).map(d => ({
-                value: d.toString(),
-                label: `${d}s`
-              }))}
-            />
+            {durationOptions.length > 0 && (
+              <Select
+                label="Duration (s)"
+                value={duration}
+                onChange={(e) => setDuration(e.target.value)}
+                options={durationOptions.map((d) => ({ value: d.toString(), label: `${d}s` }))}
+              />
+            )}
           </div>
 
           {error && (
@@ -633,12 +727,12 @@ export default function VideoGenerator() {
           <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
             <h3 className="font-semibold text-blue-900 mb-2">Tips for Better Results</h3>
             <ul className="text-sm text-blue-800 space-y-1">
-              <li>• Video generation takes 11 seconds to 6 minutes</li>
-              <li>• All videos are 8 seconds at 720p/1080p (24fps)</li>
-              <li>• Be descriptive about motion, camera movement, and lighting</li>
-              <li>• Fast model variants generate quicker at slightly lower fidelity</li>
-              <li>• Combine first+last frames OR first frame+reference images (not last+reference)</li>
-              <li>• Negative prompts help avoid unwanted elements</li>
+              <li>• Gemini Omni Flash usually needs 20–60 seconds; videos are 3–10 s at 24 fps with audio</li>
+              <li>• Cost grows with length and resolution — use 360p for drafts (1080p/4K are upscaled)</li>
+              <li>• Describe subject, motion, camera movement, lighting and sound</li>
+              <li>• With a first/last frame, describe what happens between the frames</li>
+              <li>• Prompts in English work best; real people and minors in images are blocked</li>
+              <li>• Put things to avoid in the negative prompt (it is appended as &quot;Avoid: …&quot;)</li>
             </ul>
           </div>
         </div>
@@ -676,7 +770,7 @@ export default function VideoGenerator() {
                         <div className="flex-1 min-w-0">
                           <p className="font-medium truncate">{job.prompt}</p>
                           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            {job.mode === 'text' ? 'Text-to-Video' : 'Image-to-Video'} • {' '}
+                            {modeLabel(job.mode)} • {' '}
                             {job.createdAt
                               ? formatDateTime(job.createdAt)
                               : 'Date unavailable'}
@@ -713,7 +807,7 @@ export default function VideoGenerator() {
                             View Video
                           </button>
                         )}
-                        {job.status === 'failed' && job.error && (
+                        {job.error && (
                           <p className="text-xs text-red-600 dark:text-red-400">{job.error}</p>
                         )}
                       </div>

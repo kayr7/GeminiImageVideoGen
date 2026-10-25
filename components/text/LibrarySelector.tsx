@@ -5,7 +5,7 @@ interface LibraryItem {
   name: string;
 }
 
-/** Sidebar card to pick, save or update a saved template / system prompt. */
+/** Sidebar card to pick, save, update or delete a saved template / system prompt. */
 export default function LibrarySelector({
   title,
   ariaLabel,
@@ -17,6 +17,7 @@ export default function LibrarySelector({
   onSelect,
   onSaveNew,
   onUpdate,
+  onDelete,
 }: {
   title: string;
   ariaLabel: string;
@@ -28,6 +29,7 @@ export default function LibrarySelector({
   onSelect: (id: string) => void;
   onSaveNew: () => void;
   onUpdate: () => void;
+  onDelete: () => void;
 }) {
   return (
     <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
@@ -59,6 +61,16 @@ export default function LibrarySelector({
               disabled={busy}
             >
               ✏️ Update &quot;{selected.name}&quot;
+            </button>
+          )}
+          {selected && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="text-sm text-red-600 dark:text-red-400 hover:underline ml-4"
+              disabled={busy}
+            >
+              🗑️ Delete
             </button>
           )}
         </>

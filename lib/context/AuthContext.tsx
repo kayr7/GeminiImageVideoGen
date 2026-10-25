@@ -1,7 +1,8 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { apiFetch } from '@/lib/utils/apiClient';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { AUTH_EXPIRED_EVENT, apiFetch } from '@/lib/utils/apiClient';
 import type { ApiResponse, LoginConfig, LoginResponse, LoginResponseData, LoginUser } from '@/types';
 
 const STORAGE_KEY = 'gemini-auth-session';
@@ -52,6 +53,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<LoginUser | null>(null);
   const [config, setConfig] = useState<LoginConfig | null>(null);
   const [initialising, setInitialising] = useState(true);
+  const router = useRouter();
+  const pathname = usePathname();
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
+  const tokenRef = useRef<string | null>(null);
+  tokenRef.current = token;
 
   const fetchApplicationConfiguration = useCallback(async (): Promise<LoginConfig | null> => {
     try {
@@ -221,6 +228,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
   }, [persistSession, fetchApplicationConfiguration]);
+
+  // A request with our token came back 401: the session expired or was revoked.
+  useEffect(() => {
+    const handleExpired = () => {
+      // Ignore late 401s once we are already logged out (concurrent requests).
+      if (!tokenRef.current) {
+        return;
+      }
+      tokenRef.current = null;
+      logout();
+
+      const current = pathnameRef.current || '/';
+      if (current.startsWith('/login')) {
+        return;
+      }
+      const search = typeof window !== 'undefined' ? window.location.search : '';
+      const redirect = encodeURIComponent(`${current}${search}`);
+      router.replace(`/login?redirect=${redirect}&expired=1`);
+    };
+
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleExpired);
+  }, [logout, router]);
 
   useEffect(() => {
     if (!token || !user || !config) {

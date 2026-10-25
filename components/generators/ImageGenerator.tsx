@@ -10,6 +10,8 @@ import MultiFileUpload from '../ui/MultiFileUpload';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import QuotaDisplay from './QuotaDisplay';
 import TemplateSelector from '../shared/TemplateSelector';
+import PlaceholderFields from '../shared/PlaceholderFields';
+import { preparePrompt } from '@/lib/templates/utils';
 import { CONSTANTS } from '@/lib/utils/constants';
 import { useAuth } from '@/lib/context/AuthContext';
 import { apiFetch, resolveApiUrl } from '@/lib/utils/apiClient';
@@ -38,6 +40,7 @@ export default function ImageGenerator() {
   }, [availableImageModels, imageModelAvailability?.default]);
 
   const [prompt, setPrompt] = useState('');
+  const [placeholderValues, setPlaceholderValues] = useState<Record<string, string>>({});
   const [model, setModel] = useState<string>('');
   const [aspectRatio, setAspectRatio] = useState('1:1');
   const [referenceImages, setReferenceImages] = useState<string[]>([]);
@@ -87,6 +90,17 @@ export default function ImageGenerator() {
       return;
     }
 
+    // Fill {{placeholders}} typed into the prompt (or coming from a template).
+    const { prompt: resolvedPrompt, error: placeholderError } = preparePrompt(
+      prompt,
+      placeholderValues,
+      CONSTANTS.MAX_PROMPT_LENGTH,
+    );
+    if (placeholderError) {
+      setError(placeholderError);
+      return;
+    }
+
     if (!model) {
       setError('No image model is currently available.');
       return;
@@ -101,7 +115,7 @@ export default function ImageGenerator() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt,
+          prompt: resolvedPrompt,
           model: model || undefined,
             aspectRatio,
             referenceImages:
@@ -109,10 +123,13 @@ export default function ImageGenerator() {
           }),
       });
 
-      const data = await response.json();
+      // Non-JSON bodies (e.g. a proxy timeout page) must not hide the HTTP status.
+      const data = await response.json().catch(() => null);
 
       if (!response.ok) {
-        throw new Error(getApiErrorMessage(data, 'Failed to generate image'));
+        throw new Error(
+          getApiErrorMessage(data, `Failed to generate image (HTTP ${response.status})`)
+        );
       }
 
       // Handle image data
@@ -227,6 +244,13 @@ export default function ImageGenerator() {
             maxLength={CONSTANTS.MAX_PROMPT_LENGTH}
           />
 
+          <PlaceholderFields
+            text={prompt}
+            values={placeholderValues}
+            onChange={setPlaceholderValues}
+            disabled={loading}
+          />
+
           <div className="grid grid-cols-2 gap-4">
             <Select
               label="Model"
@@ -315,6 +339,8 @@ export default function ImageGenerator() {
             <ul className="text-sm text-blue-800 space-y-1">
               <li>• Be specific and detailed in your prompt</li>
               <li>• Mention style, mood, lighting, and composition</li>
+              <li>• Describe the picture itself — greetings or questions may get no image</li>
+              <li>• Real people, brands and logos are often blocked by the safety filter</li>
               <li>• <strong>Multiple images:</strong> Combine elements or transfer style</li>
               <li>• <strong>Single image:</strong> Best for editing or variations</li>
               <li>• <strong>Nano Banana 2:</strong> Best overall — pro quality at flash speed, reference images supported</li>

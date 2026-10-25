@@ -37,11 +37,19 @@ export interface ModelInfo {
     resolutions?: string[];
     aspect_ratios?: string[];
     durations?: number[];
+    default_duration?: number;
+    default_resolution?: string;
+    /** Video: false hides the negative prompt; 'prompt' mode appends it as "Avoid: ...". */
+    supports_negative_prompt?: boolean;
+    negative_prompt_mode?: 'prompt' | 'field';
+    /** Image (generateContent) response modalities, e.g. ["IMAGE"] or ["TEXT", "IMAGE"]. */
+    response_modalities?: string[];
     video_reference_images?: {
       enabled: boolean;
       max: number;
       supports_start_frame: boolean;
       supports_end_frame: boolean;
+      supports_reference_images?: boolean;
     };
     voices?: string[];
   };

@@ -37,6 +37,7 @@ function LoginPageContent() {
   const [passwordSetupEmail, setPasswordSetupEmail] = useState('');
 
   const redirectTo = searchParams?.get('redirect') || '/';
+  const sessionExpired = searchParams?.get('expired') === '1';
 
   useEffect(() => {
     if (!initialising && token) {
@@ -214,6 +215,15 @@ function LoginPageContent() {
           Enter your credentials to access the platform.
         </p>
       </div>
+
+      {sessionExpired && (
+        <div
+          className="mb-4 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-sm text-blue-800 dark:text-blue-200"
+          role="status"
+        >
+          Your session expired, please log in again.
+        </div>
+      )}
 
       <form onSubmit={handleLoginSubmit} className="space-y-4">
         <Input
