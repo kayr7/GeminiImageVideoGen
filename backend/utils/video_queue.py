@@ -2,8 +2,8 @@
 
 import json
 import uuid
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta
+from typing import Any, Dict, Iterable, List, Optional
 
 from utils import media_inputs
 from utils.database import get_connection, initialize_database
@@ -18,6 +18,7 @@ _UPDATABLE_COLUMNS = {
     "mode": "mode",
     "error": "error",
     "mediaId": "media_id",
+    "operationId": "operation_id",
 }
 
 
@@ -91,7 +92,7 @@ class VideoQueue:
                     operation_id,
                     data.get("userId", "anonymous"),
                     data.get("prompt", ""),
-                    data.get("model", "veo-3.1-fast-generate-preview"),
+                    data.get("model", "gemini-omni-1.1-flash"),
                     data.get("mode", "text"),
                     data.get("status", "pending"),
                     int(data.get("progress", 0)),
@@ -198,6 +199,46 @@ class VideoQueue:
                 job["completedAt"] = job["completedAt"].isoformat()
 
         return jobs
+
+    def fail_unresumable_jobs(
+        self,
+        known_models: Iterable[str],
+        max_age: timedelta = timedelta(hours=1),
+    ) -> int:
+        """Mark unfinished jobs that can never complete as failed (run at startup).
+
+        A job is unresumable when its model is no longer in the registry (e.g. the
+        retired Veo models), when it has no remote interaction id to poll, or when
+        it has been unfinished for longer than ``max_age``.
+        """
+        known = set(known_models)
+        cutoff = datetime.now() - max_age
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT id, model, operation_id, created_at FROM video_jobs "
+                "WHERE status IN ('processing', 'pending')"
+            ).fetchall()
+
+        failed = 0
+        for row in rows:
+            try:
+                created = datetime.fromisoformat(row["created_at"])
+            except (TypeError, ValueError):
+                created = datetime.min
+            if row["model"] not in known:
+                reason = (
+                    f"Video model '{row['model']}' is no longer available; "
+                    "the job could not be completed. Please start a new video."
+                )
+            elif not row["operation_id"]:
+                reason = "The job was interrupted by a server restart. Please start a new video."
+            elif created < cutoff:
+                reason = "The job did not finish in time and was abandoned. Please start a new video."
+            else:
+                continue
+            self.update_job(row["id"], {"status": "failed", "error": reason})
+            failed += 1
+        return failed
 
     def _resolve_job_id(self, job_id: str) -> Optional[str]:
         """Resolve external identifiers (operation name) to the stored job ID."""

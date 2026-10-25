@@ -48,7 +48,7 @@ A Next.js-based web application that provides students with a playground to expe
 - As a user, I can edit existing images with text instructions
 - As a user, I can select aspect ratio and quality settings
 
-### 2.2 Video Generation (Veo)
+### 2.2 Video Generation (Gemini Omni)
 **Priority:** P0
 
 **Capabilities:**
@@ -58,8 +58,7 @@ A Next.js-based web application that provides students with a playground to expe
 - Progress tracking for long-running generations
 
 **API Models:**
-- `veo-3.1-generate-preview` (high quality)
-- `veo-3.1-fast-generate-preview` (fast generation)
+- `gemini-omni-1.1-flash` (Gemini Omni Flash, Interactions API; replaces the retired Veo previews)
 
 **User Stories:**
 - As a user, I can generate videos from text descriptions
@@ -163,8 +162,8 @@ MUSIC_MAX_PER_HOUR=10
 - Output: image URLs or base64
 
 **Video Generation:**
-- Model: `veo-3.1-generate-preview`, `veo-3.1-fast-generate-preview`
-- Operations: text-to-video, image-to-video
+- Model: `gemini-omni-1.1-flash`
+- Operations: text-to-video, image-to-video, first/last frame, reference images
 - Input: text prompts, optional image
 - Output: video URLs
 

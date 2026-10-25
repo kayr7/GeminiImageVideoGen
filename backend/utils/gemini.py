@@ -25,6 +25,30 @@ def get_client() -> genai.Client:
     return _client_for_key(api_key)
 
 
+@lru_cache(maxsize=1)
+def _video_client_for_key(api_key: str) -> genai.Client:
+    """Client for paid, long-running video calls: no automatic retries.
+
+    The Interactions API client retries 408/409/429/5xx and timeouts by default,
+    which could start (and bill) a second video. ``HttpRetryOptions(attempts=0)``
+    is not enough: the legacy client rewrites 0 to 1 and the Interactions client
+    maps ``attempts`` to the number of *retries*, so we zero it on the resource.
+    """
+    client = genai.Client(api_key=api_key)
+    retry_config = getattr(client.interactions.sdk_configuration, "retry_config", None)
+    if retry_config is not None and hasattr(retry_config, "max_retries"):
+        retry_config.max_retries = 0
+    return client
+
+
+def get_video_client() -> genai.Client:
+    """Return the cached no-retry client used for Gemini Omni video generation."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY not configured")
+    return _video_client_for_key(api_key)
+
+
 def get_client_ip(request: Request) -> str:
     """Best-effort client IP for abuse tracking, honouring reverse-proxy headers."""
     forwarded_for = request.headers.get("X-Forwarded-For")
@@ -72,6 +96,7 @@ def to_base64(data: bytes | str) -> str:
 __all__ = [
     "DEFAULT_IMAGE_MIME",
     "get_client",
+    "get_video_client",
     "get_client_ip",
     "split_data_url",
     "decode_data_url",

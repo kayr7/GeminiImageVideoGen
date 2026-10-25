@@ -25,6 +25,7 @@ from routers import (
     text_generation,
     speech,
     prompt_lab,
+    placeholders,
 )
 from utils.user_manager import ensure_env_admin_exists
 from utils.database import initialize_database
@@ -55,6 +56,9 @@ async def lifespan(app: FastAPI):
         logger.warning(
             "No admin credentials found in .env - please set APP_USERNAME and APP_PASSWORD"
         )
+
+    # Fail video jobs left 'processing' that can never finish (retired models, too old).
+    video.recover_video_jobs()
 
     logger.info("Application startup complete")
     yield
@@ -99,6 +103,7 @@ app.include_router(system_prompts.router, prefix="/api/text/system-prompts", tag
 app.include_router(text_generation.router, prefix="/api/text", tags=["Text Generation"])
 app.include_router(speech.router, prefix="/api/speech", tags=["Speech Generation"])
 app.include_router(prompt_lab.router, prefix="/api/prompt-lab", tags=["Prompt Lab"])
+app.include_router(placeholders.router, prefix="/api/placeholders", tags=["Placeholders"])
 
 
 @app.get("/")

@@ -25,7 +25,7 @@ _TTS_VOICES = [
 ]
 
 
-def _image(model_id, name, description, price, max_refs, ratios):
+def _image(model_id, name, description, price, max_refs, ratios, *, modalities=("IMAGE",)):
     return {
         "id": model_id,
         "name": name,
@@ -37,29 +37,50 @@ def _image(model_id, name, description, price, max_refs, ratios):
             "reference_images": {"enabled": True, "max": max_refs},
             "sample_count": {"min": 1, "max": 1},
             "aspect_ratios": list(ratios),
+            # generateContent response_modalities. The 3.x models often answer with
+            # text only (questions, greetings) when "TEXT" is allowed, so they are
+            # restricted to images; gemini-2.5-flash-image needs TEXT+IMAGE or it
+            # returns NO_IMAGE for ordinary prompts.
+            "response_modalities": list(modalities),
         },
     }
 
 
-def _video(model_id, name, description, price, resolutions, *, references):
+# Gemini Omni Flash (Interactions API). Duration is sent as response_format.duration
+# ("<n>s"); the API accepts 3-10 s. Billing is per output token: 5,792 tokens per
+# second of 720p (~$0.10/s at $17.50 per 1M tokens); a 360p clip measured
+# ~1,930 tokens/s (~$0.034/s). 1080p/4k are upscaled from 720p.
+VIDEO_DURATIONS = [4, 6, 8, 10]
+VIDEO_DEFAULT_DURATION = 8
+VIDEO_MIN_DURATION = 3
+VIDEO_MAX_DURATION = 10
+
+
+def _video(model_id, name, description, price_per_second):
     return {
         "id": model_id,
         "name": name,
         "description": description,
-        "price": price,
+        "price": price_per_second,
         "priceUnit": "per second (720p)",
-        "pricePerVideo": round(price * 8, 2),
+        "pricePerVideo": round(price_per_second * VIDEO_DEFAULT_DURATION, 2),
         "tier": "paid",
         "capabilities": {
-            "durations": [4, 6, 8],
-            "resolutions": list(resolutions),
+            "durations": list(VIDEO_DURATIONS),
+            "default_duration": VIDEO_DEFAULT_DURATION,
+            "resolutions": ["360p", "720p", "1080p", "4k"],
+            "default_resolution": "720p",
             "aspect_ratios": ["16:9", "9:16"],
+            # Omni has no negative-prompt field; the backend appends "Avoid: ..." to
+            # the prompt instead (see routers/video.py).
+            "supports_negative_prompt": True,
+            "negative_prompt_mode": "prompt",
             "video_reference_images": {
                 "enabled": True,
-                "max": 3 if references else 0,
+                "max": 3,
                 "supports_start_frame": True,
                 "supports_end_frame": True,
-                "supports_reference_images": references,
+                "supports_reference_images": True,
             },
         },
     }
@@ -105,16 +126,12 @@ _MODEL_REGISTRY: Dict[str, List[ModelInfoDict]] = {
                0.14, 14, _RATIOS_10),
         _image("gemini-2.5-flash-image", "Nano Banana (Gemini 2.5 Flash, legacy)",
                "Legacy fast image generation",
-               0.0387, 3, ["1:1", "3:4", "4:3", "9:16", "16:9"]),
+               0.0387, 3, ["1:1", "3:4", "4:3", "9:16", "16:9"],
+               modalities=("TEXT", "IMAGE")),
     ],
     "video": [
-        _video("veo-3.1-generate-preview", "Veo 3.1",
-               "High quality 8s video with audio", 0.40, ["720p", "1080p"], references=True),
-        _video("veo-3.1-fast-generate-preview", "Veo 3.1 Fast",
-               "Fast 8s video with audio", 0.10, ["720p", "1080p"], references=True),
-        _video("veo-3.1-lite-generate-preview", "Veo 3.1 Lite",
-               "Cheapest Veo — text/first/last frame only, no reference images",
-               0.05, ["720p", "1080p"], references=False),
+        _video("gemini-omni-1.1-flash", "Gemini Omni Flash",
+               "Text/image-to-video with audio, 3-10 s, up to 4K (upscaled)", 0.10),
     ],
     "speech": [
         _speech("gemini-3.8-flash-tts", "Gemini 3.8 Flash TTS",
@@ -311,12 +328,20 @@ def resolve_model_choice(category: str, requested_model: str | None) -> ModelInf
     """Return the enabled model info for ``category`` honouring overrides.
 
     The helper prefers the explicitly requested model when it is enabled. If no
-    model is provided (or the provided model is blank), the first enabled model
-    becomes the default. A ``LookupError`` is raised when the requested model is
+    model is provided (or the provided model is blank), the configured default
+    (admin/env override) is used, falling back to the first enabled model. A ``LookupError`` is raised when the requested model is
     disabled/unknown or the category has no enabled models.
     """
 
-    enabled_models = list_enabled_models(category)
+    category = category.lower()
+    if category not in _MODELS_BY_CATEGORY:
+        raise LookupError(f"No enabled models configured for category '{category}'.")
+    admin_settings = get_admin_model_settings()
+    overrides = (
+        admin_settings.get(category, {}) if isinstance(admin_settings, dict) else {}
+    )
+    availability = _apply_model_overrides(category, _MODELS_BY_CATEGORY[category], overrides)
+    enabled_models = availability["enabled"]
     if not enabled_models:
         raise LookupError(f"No enabled models configured for category '{category}'.")
 
@@ -330,6 +355,10 @@ def resolve_model_choice(category: str, requested_model: str | None) -> ModelInf
             f"Model '{requested}' is disabled or unavailable for category '{category}'."
         )
 
+    default_id = availability.get("default")
+    for model in enabled_models:
+        if model["id"] == default_id:
+            return model
     return enabled_models[0]
 
 

@@ -49,12 +49,50 @@ def test_stale_admin_overrides_fall_back_to_first_valid_model():
     assert resolve_model_choice("image", None)["id"] == ids[0]
 
     store_admin_model_settings("video", {
-        "enabled": ["veo-3.1-fast-generate-preview", "veo-3.0-generate-001"],
-        "default": "veo-3.0-generate-001",
+        "enabled": ["gemini-omni-1.1-flash", "veo-3.1-fast-generate-preview"],
+        "default": "veo-3.1-fast-generate-preview",
     })
     cfg = get_model_configuration()["video"]
-    assert [m["id"] for m in cfg["enabled"]] == ["veo-3.1-fast-generate-preview"]
-    assert cfg["default"] == "veo-3.1-fast-generate-preview"
+    assert [m["id"] for m in cfg["enabled"]] == ["gemini-omni-1.1-flash"]
+    assert cfg["default"] == "gemini-omni-1.1-flash"
+
+    # Only retired ids stored: the list is ignored and the registry is used.
+    store_admin_model_settings("video", {
+        "enabled": ["veo-3.1-generate-preview"], "default": "veo-3.1-generate-preview",
+    })
+    assert resolve_model_choice("video", None)["id"] == "gemini-omni-1.1-flash"
+    with pytest.raises(LookupError):
+        resolve_model_choice("video", "veo-3.1-fast-generate-preview")
+
+
+def test_blank_model_resolves_to_configured_default(monkeypatch):
+    from utils.admin_config import store_admin_model_settings
+
+    store_admin_model_settings("image", {"default": "gemini-3-pro-image"})
+    assert resolve_model_choice("image", "")["id"] == "gemini-3-pro-image"
+    assert resolve_model_choice("image", None)["id"] == "gemini-3-pro-image"
+    # an explicit choice still wins
+    assert resolve_model_choice("image", "gemini-2.5-flash-image")["id"] == "gemini-2.5-flash-image"
+
+    store_admin_model_settings("image", {})
+    monkeypatch.setenv("DEFAULT_IMAGE_MODEL", "gemini-3.1-flash-lite-image")
+    assert resolve_model_choice("image", None)["id"] == "gemini-3.1-flash-lite-image"
+    # a disabled default falls back to the first enabled model
+    monkeypatch.setenv("DISABLED_IMAGE_MODELS", "gemini-3.1-flash-lite-image")
+    assert resolve_model_choice("image", None)["id"] == "gemini-nano-banana-2.1"
+
+
+def test_video_registry_is_omni_only():
+    from utils.config import get_model_registry
+
+    (omni,) = get_model_registry()["video"]
+    caps = omni["capabilities"]
+    assert omni["id"] == "gemini-omni-1.1-flash"
+    assert caps["aspect_ratios"] == ["16:9", "9:16"]
+    assert caps["resolutions"] == ["360p", "720p", "1080p", "4k"]
+    assert caps["video_reference_images"]["supports_reference_images"] is True
+    assert caps["default_duration"] in caps["durations"]
+    assert omni["pricePerVideo"] == round(omni["price"] * caps["default_duration"], 2)
 
 
 def test_text_endpoint_rejects_unknown_model(client, make_user, fake_gemini):

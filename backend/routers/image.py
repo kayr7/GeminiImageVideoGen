@@ -48,11 +48,105 @@ def _image_parts(prompt: str, data_urls: Optional[List[str]]) -> List[Any]:
     return parts
 
 
+_SAFETY_FINISH_REASONS = {
+    "IMAGE_SAFETY",
+    "IMAGE_PROHIBITED_CONTENT",
+    "IMAGE_OTHER",
+    "SAFETY",
+    "PROHIBITED_CONTENT",
+    "BLOCKLIST",
+    "SPII",
+    "IMAGE_RECITATION",
+    "RECITATION",
+}
+_MAX_TEXT_REPLY = 500
+
+
+def _enum_name(value: Any) -> Optional[str]:
+    """Normalise SDK enums / strings (``FinishReason.IMAGE_OTHER``) to ``IMAGE_OTHER``."""
+    if value is None:
+        return None
+    name = getattr(value, "name", None) or str(value)
+    return name.rsplit(".", 1)[-1].upper() or None
+
+
+def _no_image_error(
+    model_name: str,
+    finish_reason: Optional[str],
+    block_reason: Optional[str],
+    text_reply: str,
+) -> HTTPException:
+    """Build the 422 returned when the model answered without an image."""
+    reason = block_reason or finish_reason
+    if block_reason or (finish_reason in _SAFETY_FINISH_REASONS):
+        message = (
+            "The request was blocked by the model's safety filter. Common causes are "
+            "real people (celebrities, politicians), brands/logos or copyrighted "
+            "characters, or sensitive content. Rephrase the prompt or use different "
+            "reference images."
+        )
+    elif finish_reason == "NO_IMAGE":
+        message = (
+            "The model did not produce an image for this prompt. Describe the picture "
+            "you want to see (subject, style, setting) instead of asking a question or "
+            "sending a greeting."
+        )
+    else:
+        message = (
+            "The model did not return an image. Try rephrasing the prompt as a "
+            "description of the picture you want."
+        )
+    if reason:
+        message += f" (reason: {reason})"
+    text_reply = (text_reply or "").strip()
+    if text_reply:
+        if len(text_reply) > _MAX_TEXT_REPLY:
+            text_reply = text_reply[:_MAX_TEXT_REPLY].rstrip() + "…"
+        message += f" The model replied: \"{text_reply}\""
+
+    logger.warning(
+        "No image in response (model=%s, finish_reason=%s, block_reason=%s, text=%r)",
+        model_name, finish_reason, block_reason, text_reply[:200],
+    )
+    return HTTPException(status_code=422, detail=message)
+
+
+def _upstream_error(model_name: str, api_error: Exception) -> HTTPException:
+    """Map an exception from the Gemini SDK to an HTTP error for the client."""
+    logger.exception("Gemini image API error (model=%s)", model_name)
+    status = getattr(api_error, "code", None) or getattr(api_error, "status_code", None)
+    error_msg = getattr(api_error, "message", None) or str(api_error)
+    if status == 429:
+        return HTTPException(
+            status_code=429,
+            detail="The image service is busy or the API quota is exhausted. Please try again in a minute.",
+        )
+    if status == 400:
+        return HTTPException(
+            status_code=400,
+            detail=f"The image model rejected the request: {error_msg}",
+        )
+    if isinstance(status, int) and status >= 500:
+        return HTTPException(
+            status_code=502,
+            detail=f"The image service had a temporary problem ({status}). Please try again. {error_msg}",
+        )
+    return HTTPException(status_code=500, detail=f"Image generation failed: {error_msg}")
+
+
 def _generate_with_gemini(
-    client, model_name: str, parts: List[Any], aspect_ratio: Optional[str]
+    client,
+    model_name: str,
+    parts: List[Any],
+    aspect_ratio: Optional[str],
+    response_modalities: Optional[List[str]] = None,
 ) -> Tuple[str, str]:
-    """Call a Nano Banana (generateContent) model; return (base64 image, mime type)."""
-    config: Dict[str, Any] = {"response_modalities": ["Text", "Image"]}
+    """Call a Nano Banana (generateContent) model; return (base64 image, mime type).
+
+    Raises HTTPException 422 (with a user-facing explanation) when the model
+    answers without an image, e.g. because of the safety filter or a text reply.
+    """
+    config: Dict[str, Any] = {"response_modalities": list(response_modalities or ["IMAGE"])}
     if aspect_ratio and aspect_ratio != "1:1":
         config["image_config"] = {"aspect_ratio": aspect_ratio}
 
@@ -61,44 +155,42 @@ def _generate_with_gemini(
             model=model_name, contents=parts, config=config
         )
     except Exception as api_error:
-        logger.exception("Gemini image API error (model=%s)", model_name)
-        error_msg = str(api_error)
-        if "IMAGE_OTHER" in error_msg or "not a valid" in error_msg:
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    "The model encountered an issue processing the request. This may "
-                    "happen with certain reference images. Try with fewer or different "
-                    f"reference images. Error: {error_msg}"
-                ),
-            )
-        raise HTTPException(status_code=500, detail=f"Gemini API error: {error_msg}")
+        raise _upstream_error(model_name, api_error)
 
-    if not response or not response.candidates:
-        raise HTTPException(
-            status_code=500,
-            detail="No candidates in response from Gemini API. The model may have rejected the request.",
-        )
+    feedback = getattr(response, "prompt_feedback", None) if response else None
+    block_reason = _enum_name(getattr(feedback, "block_reason", None))
+    candidates = (getattr(response, "candidates", None) or []) if response else []
+    candidate = candidates[0] if candidates else None
+    finish_reason = _enum_name(getattr(candidate, "finish_reason", None))
+    content = getattr(candidate, "content", None)
 
-    candidate = response.candidates[0]
-    finish_reason = getattr(candidate, "finish_reason", None)
-    if not candidate.content:
-        raise HTTPException(
-            status_code=500,
-            detail=f"No content in response. Finish reason: {finish_reason}. The model may have filtered the request.",
-        )
-    if not candidate.content.parts:
-        raise HTTPException(
-            status_code=500,
-            detail=f"No content parts in response. Finish reason: {finish_reason}. The model may have encountered an error.",
-        )
-
-    for part in candidate.content.parts:
+    text_chunks: List[str] = []
+    draft = None  # interim "thought" image (3.x models), only used as a fallback
+    for part in (getattr(content, "parts", None) or []):
+        is_thought = bool(getattr(part, "thought", False))
         inline = getattr(part, "inline_data", None)
         if inline and inline.data:
-            return to_base64(inline.data), (inline.mime_type or DEFAULT_IMAGE_MIME)
+            if not is_thought:
+                return to_base64(inline.data), (inline.mime_type or DEFAULT_IMAGE_MIME)
+            draft = draft or inline
+            continue
+        text = getattr(part, "text", None)
+        if text and not is_thought:
+            text_chunks.append(text)
+    if draft is not None:
+        return to_base64(draft.data), (draft.mime_type or DEFAULT_IMAGE_MIME)
 
-    raise HTTPException(status_code=500, detail="No image data in response")
+    if finish_reason == "NO_IMAGE" and config["response_modalities"] == ["IMAGE"]:
+        # Image-only requests occasionally come back empty for question-like prompts
+        # that the same model answers with text + image; retry once in that mode.
+        logger.info("No image from %s in IMAGE-only mode; retrying with TEXT+IMAGE", model_name)
+        return _generate_with_gemini(client, model_name, parts, aspect_ratio, ["TEXT", "IMAGE"])
+
+    raise _no_image_error(model_name, finish_reason, block_reason, " ".join(text_chunks))
+
+
+def _response_modalities(model_info: Dict[str, Any]) -> List[str]:
+    return model_info.get("capabilities", {}).get("response_modalities") or ["IMAGE"]
 
 
 def _save_and_respond(
@@ -184,6 +276,7 @@ def generate_image(
             model_name,
             _image_parts(req.prompt, req.referenceImages),
             req.aspectRatio,
+            _response_modalities(model_info),
         )
         details = {"referenceImages": req.referenceImages} if req.referenceImages else None
 
@@ -232,6 +325,7 @@ def edit_image(
             model_name,
             _image_parts(req.prompt, req.sourceImages),
             req.aspectRatio,
+            _response_modalities(model_info),
         )
         return _save_and_respond(
             image_base64=image_base64,

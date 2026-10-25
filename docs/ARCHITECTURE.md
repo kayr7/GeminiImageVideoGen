@@ -38,7 +38,7 @@ only in the backend; the browser never sees it.
 | `utils/user_manager.py`, `session.py`, `auth.py` | Users, bearer-token sessions (24 h), auth dependencies |
 | `utils/quota_manager.py` | Per-user quotas |
 | `utils/rate_limiter.py` | In-memory rate limits |
-| `utils/media_storage.py`, `video_queue.py`, `video_frame_extractor.py` | Files in `.media-storage/`, async video jobs in `.video-jobs/`, first/last frame extraction |
+| `utils/media_storage.py`, `video_queue.py`, `video_frame_extractor.py` | Files in `.media-storage/`, async video jobs (Gemini Omni background interactions, see [VIDEO.md](VIDEO.md)), first/last frame extraction |
 | `utils/text_generation_manager.py`, `chat_session_manager.py`, `template_manager.py`, `system_prompt_manager.py` | Text features |
 | `utils/gemini.py` | Shared Gemini client helper |
 

@@ -22,7 +22,7 @@ Where things live. For how they interact see [ARCHITECTURE.md](ARCHITECTURE.md).
 | `DEPLOYMENT.md` | Setup, Docker, nginx/HTTPS, troubleshooting |
 | `nginx.conf.example` | Working nginx config for the subpath deployment |
 | `ARCHITECTURE.md` | System overview |
-| `VEO.md` | Veo parameter rules |
+| `VIDEO.md` | Video generation with Gemini Omni Flash (job flow, parameters, pricing) |
 | `prd.md`, `prfaq.md` | Product requirements and PR/FAQ |
 
 ## Frontend

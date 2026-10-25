@@ -293,7 +293,7 @@ A: Check these items:
 **Q: The application is slow. How can I improve performance?**
 
 A: Performance tips:
-1. Use the "fast" variants of models (Nano Banana, Veo Fast)
+1. Use the "fast"/"lite" variants of models (Nano Banana 2 Lite) and 360p for draft videos
 2. Reduce image resolution settings
 3. Ensure adequate server resources
 4. Check network connectivity

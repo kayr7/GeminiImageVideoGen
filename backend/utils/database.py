@@ -429,6 +429,25 @@ MIGRATIONS: list[tuple[int, Iterable[str]]] = [
             """,
         ),
     ),
+    (
+        11,
+        (
+            """
+            CREATE TABLE IF NOT EXISTS user_placeholders (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                value TEXT NOT NULL,
+                description TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                UNIQUE(user_id, name)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_user_placeholders_user_id ON user_placeholders(user_id)",
+        ),
+    ),
 ]
 
 _db_initialized = False
