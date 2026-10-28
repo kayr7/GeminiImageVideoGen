@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAuth } from '@/lib/context/AuthContext';
 import LoadingSpinner from '@/components/shared/LoadingSpinner';
 import Button from '@/components/ui/Button';
@@ -10,6 +10,7 @@ import LibrarySelector from '@/components/text/LibrarySelector';
 import MessageList from '@/components/text/MessageList';
 import SaveLibraryModal from '@/components/text/SaveLibraryModal';
 import PlaceholderFields from '@/components/shared/PlaceholderFields';
+import PlaceholderChips from '@/components/shared/PlaceholderChips';
 import { formatDateTime } from '@/lib/utils/files';
 import { templateAPI, systemPromptAPI, textGenerationAPI, chatAPI } from '@/lib/text/api';
 import {
@@ -51,6 +52,8 @@ export default function TextGenerationPage() {
   // User input
   const [systemPromptText, setSystemPromptText] = useState('');
   const [userMessage, setUserMessage] = useState('');
+  const systemPromptRef = useRef<HTMLTextAreaElement>(null);
+  const userMessageRef = useRef<HTMLTextAreaElement>(null);
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
 
   // Chat state
@@ -664,12 +667,22 @@ export default function TextGenerationPage() {
               System Prompt (Optional)
             </label>
             <Textarea
+              ref={systemPromptRef}
               value={systemPromptText}
               onChange={(e) => setSystemPromptText(e.target.value)}
               placeholder="e.g., You are a helpful assistant that explains things simply"
               rows={3}
               disabled={systemPromptLocked}
             />
+            {!systemPromptLocked && (
+              <PlaceholderChips
+                textareaRef={systemPromptRef}
+                value={systemPromptText}
+                onChange={setSystemPromptText}
+                disabled={loading}
+                className="mt-2"
+              />
+            )}
             {!systemPromptLocked && (
               <PlaceholderFields
                 text={systemPromptText}
@@ -722,6 +735,7 @@ export default function TextGenerationPage() {
                   {/* Message Input */}
                   <div>
                     <Textarea
+                      ref={userMessageRef}
                       value={userMessage}
                       onChange={(e) => setUserMessage(e.target.value)}
                       placeholder="Type your message..."
@@ -733,6 +747,13 @@ export default function TextGenerationPage() {
                           void handleSendMessage();
                         }
                       }}
+                    />
+                    <PlaceholderChips
+                      textareaRef={userMessageRef}
+                      value={userMessage}
+                      onChange={setUserMessage}
+                      disabled={loading}
+                      className="mt-2"
                     />
                     <PlaceholderFields
                       text={userMessage}
@@ -765,11 +786,19 @@ export default function TextGenerationPage() {
                   Your Message (use {'{{'} variable {'}}'}  for templates)
                 </label>
                 <Textarea
+                  ref={userMessageRef}
                   value={userMessage}
                   onChange={(e) => setUserMessage(e.target.value)}
                   placeholder="e.g., Write a {{style}} email to {{recipient}} about {{topic}}"
                   rows={6}
                   disabled={loading}
+                />
+                <PlaceholderChips
+                  textareaRef={userMessageRef}
+                  value={userMessage}
+                  onChange={setUserMessage}
+                  disabled={loading}
+                  className="mt-2"
                 />
 
                 <PlaceholderFields
