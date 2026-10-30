@@ -56,6 +56,12 @@ export const parseTags = (value: string): string[] =>
     .map((t) => t.trim())
     .filter((t) => t.length > 0);
 
+/** Parse a limit input; 0 is a valid limit, only blank/invalid input falls back. */
+const parseLimit = (value: string, fallback: number): number => {
+  const n = parseInt(value, 10);
+  return Number.isNaN(n) ? fallback : Math.max(0, n);
+};
+
 /** Build the quota payload for every generation type from string limits typed in a form. */
 export const buildQuotaSettings = (
   quotaType: QuotaType,
@@ -66,7 +72,7 @@ export const buildQuotaSettings = (
     result[type] =
       quotaType === 'unlimited'
         ? { type: 'unlimited', limit: null }
-        : { type: 'limited', limit: parseInt(limits[type]) || DEFAULT_LIMITS[type] };
+        : { type: 'limited', limit: parseLimit(limits[type], DEFAULT_LIMITS[type]) };
   }
   return result;
 };

@@ -221,7 +221,7 @@ async def get_me(user: LoginUser = Depends(get_current_user)) -> SuccessResponse
             quotaUsed=quota.quota_used,
             quotaRemaining=(
                 max(0, quota.quota_limit - quota.quota_used)
-                if quota.quota_limit
+                if quota.quota_limit is not None
                 else None
             ),
             quotaResetAt=quota.quota_reset_at,
