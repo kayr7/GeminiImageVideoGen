@@ -26,6 +26,7 @@ from routers import (
     speech,
     prompt_lab,
     placeholders,
+    similarity,
 )
 from utils.user_manager import ensure_env_admin_exists
 from utils.database import initialize_database
@@ -91,6 +92,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Administration"])
 app.include_router(prompt_lab.admin_router, prefix="/api/admin/prompt-lab", tags=["Prompt Lab Admin"])
+app.include_router(similarity.router, prefix="/api/admin/similarity", tags=["Similarity Admin"])
 app.include_router(users.router, prefix="/api/admin/users", tags=["User Management"])
 app.include_router(quotas.router, prefix="/api/admin/quotas", tags=["Quota Management"])
 app.include_router(config.router, prefix="/api/config", tags=["Configuration"])

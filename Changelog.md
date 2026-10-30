@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Admin-only text similarity comparison**
+  - New "Similarity comparison" panel on the admin page: compares two short texts (up to 2,000 characters each) and shows the cosine similarity from the `nomic-embed-text` embedding model
+  - New endpoint `POST /api/admin/similarity`, restricted to admins (401/403 otherwise); returns 503 if the embedding service is unreachable
+  - Embeddings come from a local Ollama server (`OLLAMA_URL`, default `http://localhost:11434`; run `ollama pull nomic-embed-text`)
+  - Files: `backend/routers/similarity.py`, `backend/utils/embeddings.py`, `components/admin/SimilarityPanel.tsx`, `app/admin/page.tsx`
+
+---
+
 ## [3.9.0] - 2026-10-25
 
 ### Added

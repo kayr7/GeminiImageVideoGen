@@ -11,6 +11,7 @@ import DeleteUsersModal, { type DeleteSummary, type DeleteTarget } from '@/compo
 import BulkCreateModal from '@/components/admin/BulkCreateModal';
 import UserFilters, { type StatusFilter } from '@/components/admin/UserFilters';
 import PromptLabPanel from '@/components/admin/PromptLabPanel';
+import SimilarityPanel from '@/components/admin/SimilarityPanel';
 import UserTable from '@/components/admin/UserTable';
 import {
   DEFAULT_LIMITS,
@@ -581,6 +582,7 @@ export default function AdminPage() {
   return (
     <div className="max-w-full mx-auto space-y-4">
       <PromptLabPanel />
+      <SimilarityPanel />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">User Management</h1>
